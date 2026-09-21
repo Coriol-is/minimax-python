@@ -114,5 +114,8 @@ def test_public_surface_is_importable_from_the_package_root() -> None:
         "NotFoundError",
         "ValidationError",
         "TransportError",
+        "AmbiguousWriteError",
+        "paginate",
+        "DEFAULT_PAGE_SIZE",
     ):
         assert hasattr(minimax_api, name), name
