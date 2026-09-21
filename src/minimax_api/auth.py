@@ -12,6 +12,7 @@ class entirely and leave the latch untouched.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -99,6 +100,14 @@ class Authenticator:
         self._clock = clock
         self._expiry_skew = expiry_skew
         self._latched: MinimaxAuthError | None = None
+        # Guards token acquisition. httpx.Client is thread-safe, so sharing one
+        # MinimaxClient (and therefore one Authenticator) across a worker pool
+        # is the expected deployment. Without this lock, N threads racing
+        # access_token() with no cached token each see "no token, not latched"
+        # and each send their own request to the token endpoint -- with a bad
+        # password, that is exactly the burst that locks the Minimax
+        # application, which is the one thing this class exists to prevent.
+        self._lock = threading.Lock()
 
     def access_token(self) -> str:
         """Return a usable token, requesting one only when necessary."""
@@ -109,9 +118,23 @@ class Authenticator:
         if token is not None and token.expires_at - self._expiry_skew > self._clock():
             return token.access_token
 
-        token = self._request_token()
-        self._store.set(token)
-        return token.access_token
+        # Slow path: no usable token. Only one thread may talk to the token
+        # endpoint at a time -- the checks above are re-done under the lock
+        # (double-checked locking) so a thread that queues behind a winning
+        # refresh uses the token that refresh just stored, instead of issuing
+        # a second request, and a thread that queues behind a latching
+        # failure raises without ever touching the network.
+        with self._lock:
+            if self._latched is not None:
+                raise self._latched
+
+            token = self._store.get()
+            if token is not None and token.expires_at - self._expiry_skew > self._clock():
+                return token.access_token
+
+            token = self._request_token()
+            self._store.set(token)
+            return token.access_token
 
     def invalidate(self) -> None:
         """Drop the cached token, e.g. after an API call answered 401."""

@@ -13,6 +13,7 @@ limit from its own rejection and applies a local penalty.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from typing import Protocol
@@ -67,36 +68,46 @@ class Budget:
         self._monthly_limit = monthly_limit
         self._clock = clock
         self._blocked_until: float = 0.0
+        # Guards _blocked_until and the store. A shared MinimaxClient is used
+        # across worker threads (httpx.Client is thread-safe, so nothing stops
+        # a caller from doing the same with the Budget sitting behind it), and
+        # check-then-record is a classic race without this: two threads could
+        # both pass check() just under the limit and both record(), over-
+        # spending it, or a penalize() from a 429 response could be missed by
+        # a thread already inside check().
+        self._lock = threading.Lock()
 
     def check(self) -> None:
         """Raise RateBudgetExceeded if sending now would exceed a limit."""
-        now = self._clock()
+        with self._lock:
+            now = self._clock()
 
-        if now < self._blocked_until:
-            raise RateBudgetExceeded(
-                "the server rejected a recent request as rate limited",
-                retry_after=self._blocked_until - now,
-            )
+            if now < self._blocked_until:
+                raise RateBudgetExceeded(
+                    "the server rejected a recent request as rate limited",
+                    retry_after=self._blocked_until - now,
+                )
 
-        self._store.prune(before=now - MONTH_SECONDS)
+            self._store.prune(before=now - MONTH_SECONDS)
 
-        daily = self._store.since(now - DAY_SECONDS)
-        if len(daily) >= self._daily_limit:
-            raise RateBudgetExceeded(
-                f"daily budget of {self._daily_limit} requests is spent",
-                retry_after=min(daily) + DAY_SECONDS - now,
-            )
+            daily = self._store.since(now - DAY_SECONDS)
+            if len(daily) >= self._daily_limit:
+                raise RateBudgetExceeded(
+                    f"daily budget of {self._daily_limit} requests is spent",
+                    retry_after=min(daily) + DAY_SECONDS - now,
+                )
 
-        monthly = self._store.since(now - MONTH_SECONDS)
-        if len(monthly) >= self._monthly_limit:
-            raise RateBudgetExceeded(
-                f"monthly budget of {self._monthly_limit} requests is spent",
-                retry_after=min(monthly) + MONTH_SECONDS - now,
-            )
+            monthly = self._store.since(now - MONTH_SECONDS)
+            if len(monthly) >= self._monthly_limit:
+                raise RateBudgetExceeded(
+                    f"monthly budget of {self._monthly_limit} requests is spent",
+                    retry_after=min(monthly) + MONTH_SECONDS - now,
+                )
 
     def record(self) -> None:
         """Count a request that actually reached Minimax."""
-        self._store.append(self._clock())
+        with self._lock:
+            self._store.append(self._clock())
 
     def penalize(self, retry_after: float) -> None:
         """Accept a server-side rate-limit verdict, blocking this Budget instance.
@@ -104,4 +115,5 @@ class Budget:
         The penalty is applied only to this instance and does not travel through
         a shared store, so sibling processes do not benefit from this knowledge.
         """
-        self._blocked_until = self._clock() + retry_after
+        with self._lock:
+            self._blocked_until = self._clock() + retry_after
