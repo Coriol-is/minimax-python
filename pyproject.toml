@@ -1,0 +1,69 @@
+[project]
+name = "minimax-api"
+version = "0.1.0"
+description = "Python client for the Minimax (Saop) accounting REST API"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Coriolis" }]
+keywords = ["minimax", "saop", "accounting", "serbia", "erp"]
+dependencies = ["httpx>=0.27", "pydantic>=2.6"]
+
+[project.urls]
+Homepage = "https://github.com/Coriol-is/minimax-python"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/minimax_api"]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "mypy>=1.9", "ruff>=0.4"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+# The default run is offline. Live tests need real credentials and spend
+# from the organisation's daily request budget, so they are opt-in.
+addopts = ["-m", "not live"]
+markers = ["live: makes real calls to moj.minimax.rs using credentials from .env"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+# Every generated model declares `populate_by_name=True` (via MinimaxModel) and
+# every field carries an explicit `Field(alias=...)`. Without this plugin, mypy
+# synthesizes constructor signatures from `dataclass_transform` using only the
+# alias, and rejects the Python-name keyword arguments this library's contract
+# explicitly allows. The plugin understands `populate_by_name` and accepts both.
+plugins = ["pydantic.mypy"]
+# `tests/test_generator_models.py` imports `generate` via a sys.path hack
+# (see that file) so it can test the generator without installing `scripts/`
+# as a package; this lets mypy resolve the same import.
+mypy_path = ["scripts"]
+
+[[tool.mypy.overrides]]
+# Generated code is checked, but its dynamic construction defeats some inference.
+module = "minimax_api._generated.*"
+disallow_any_explicit = false
+
+[tool.pydantic-mypy]
+# Without these, the plugin sees `MinimaxModel`'s `extra="allow"` and synthesizes
+# a permissive `__init__(self, **data: Any)` for every model, which silently
+# stops checking constructor argument types altogether. `init_typed` restores
+# per-field typing on the synthesized `__init__`; `init_forbid_extra` stops
+# `extra="allow"` (a *runtime* parsing behaviour) from also disabling
+# *construction-time* keyword checking.
+init_typed = true
+init_forbid_extra = true
+warn_required_dynamic_aliases = true
