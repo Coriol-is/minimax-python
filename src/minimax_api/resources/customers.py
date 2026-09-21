@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from minimax_api._generated.models import Customer, CustomerSearch
-from minimax_api.errors import ValidationError
+from minimax_api.errors import AmbiguousWriteError, ValidationError
 from minimax_api.pagination import DEFAULT_PAGE_SIZE, paginate
 from minimax_api.transport import Transport
 
@@ -40,11 +40,14 @@ class Customers:
         response = self._transport.request("POST", self._base, json=payload)
         created = response.location_id
         if created is None:
-            raise ValidationError(
-                "customer was created but Minimax returned no Location header, so its ID is "
-                "unknown; reconcile by search before retrying",
-                status_code=response.status_code,
-                payload=response.json,
+            # The write succeeded -- Minimax just didn't tell us the new ID.
+            # This is not a rejected payload, so it must not be
+            # ValidationError: that type tells a caller "fix the payload and
+            # resubmit", and resubmitting here creates a second customer.
+            raise AmbiguousWriteError(
+                "customer was created but Minimax returned no Location header, so its ID "
+                "is unknown. Reconcile by searching for the customer (e.g. by name or tax "
+                "number) before creating it again -- do not resend this payload."
             )
         return created
 

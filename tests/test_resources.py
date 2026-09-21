@@ -5,7 +5,7 @@ import pytest
 
 from minimax_api import MinimaxClient
 from minimax_api.auth import Credentials
-from minimax_api.errors import ConcurrencyError, ValidationError
+from minimax_api.errors import AmbiguousWriteError, ConcurrencyError, ValidationError
 
 CREDENTIALS = Credentials(
     client_id="client", client_secret="secret", username="user", password="password"
@@ -101,12 +101,25 @@ def test_creating_a_customer_returns_the_id_from_the_location_header() -> None:
     assert '"Name": "ACME"' in captured["body"] or '"Name":"ACME"' in captured["body"]
 
 
-def test_creating_a_customer_without_a_location_header_is_an_error() -> None:
+def test_creating_a_customer_with_no_location_header_is_ambiguous_not_invalid() -> None:
+    # The write succeeded -- Minimax just didn't say what the new ID is. That
+    # must not be reported as ValidationError: a caller who sees that type and
+    # "fixes the payload" would resubmit an identical customer, duplicating it.
     client = make_client({("POST", "/RS/API/api/orgs/97271/customers"): httpx.Response(201)})
     from minimax_api.models import Customer
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(AmbiguousWriteError):
         client.customers.create(Customer(name="ACME"))
+
+
+def test_creating_an_issued_invoice_without_a_location_header_is_ambiguous() -> None:
+    client = make_client(
+        {("POST", "/RS/API/api/orgs/97271/issuedinvoices"): httpx.Response(201)}
+    )
+    from minimax_api.models import IssuedInvoice
+
+    with pytest.raises(AmbiguousWriteError):
+        client.issued_invoices.create(IssuedInvoice())
 
 
 def test_updating_without_a_row_version_is_refused_before_the_request() -> None:

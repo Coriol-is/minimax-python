@@ -9,7 +9,7 @@ creates and reads; deciding when to issue belongs to the caller.
 from __future__ import annotations
 
 from minimax_api._generated.models import IssuedInvoice
-from minimax_api.errors import ValidationError
+from minimax_api.errors import AmbiguousWriteError
 from minimax_api.pagination import DEFAULT_PAGE_SIZE, paginate
 from minimax_api.transport import Transport
 
@@ -33,10 +33,14 @@ class IssuedInvoices:
         response = self._transport.request("POST", self._base, json=payload)
         created = response.location_id
         if created is None:
-            raise ValidationError(
-                "invoice was created but Minimax returned no Location header, so its ID is "
-                "unknown; reconcile by search before retrying",
-                status_code=response.status_code,
-                payload=response.json,
+            # The invoice was created -- Minimax just didn't tell us the new
+            # ID. Never surface this as ValidationError: a caller with the
+            # obvious handler for "the server rejected my payload" would fix
+            # nothing and resubmit, duplicating the invoice in the ledger.
+            raise AmbiguousWriteError(
+                "invoice was created but Minimax returned no Location header, so its ID "
+                "is unknown. Reconcile by searching for the invoice (e.g. by document "
+                "number or the customer's order reference) before creating it again -- "
+                "do not resend this payload."
             )
         return created
