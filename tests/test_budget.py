@@ -92,3 +92,43 @@ def test_a_shared_store_is_counted_once_across_clients() -> None:
     second.record()
     with pytest.raises(RateBudgetExceeded):
         first.check()
+
+
+def test_retry_after_is_computed_correctly_even_if_store_returns_unordered_results() -> None:
+    """Verify min() is used, not index 0, so store ordering doesn't matter."""
+
+    class ShuffledBudgetStore:
+        """A store that deliberately returns results in reverse order."""
+
+        def __init__(self) -> None:
+            self._timestamps: list[float] = []
+
+        def append(self, timestamp: float) -> None:
+            self._timestamps.append(timestamp)
+
+        def since(self, timestamp: float) -> list[float]:
+            result = [value for value in self._timestamps if value > timestamp]
+            result.reverse()  # Return in reverse order, not insertion order
+            return result
+
+        def prune(self, before: float) -> None:
+            self._timestamps = [value for value in self._timestamps if value > before]
+
+    now = [1000.0]
+    store = ShuffledBudgetStore()
+    budget = Budget(clock=lambda: now[0], store=store, daily_limit=3)
+
+    # Record three requests at different times
+    budget.check()
+    budget.record()
+    now[0] += 10.0
+    budget.check()
+    budget.record()
+    now[0] += 10.0
+    budget.check()
+    budget.record()
+
+    # Oldest at 1000.0, now at 1020.0. retry_after = 1000 + DAY - 1020 = DAY - 20.
+    with pytest.raises(RateBudgetExceeded) as raised:
+        budget.check()
+    assert raised.value.retry_after == pytest.approx(DAY - 20.0)

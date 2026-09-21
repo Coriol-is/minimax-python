@@ -6,7 +6,9 @@ waits. The caller owns a scheduler and a database, and a library that blocks a
 worker for an unknown number of hours is a bug.
 
 The count is an estimate. Other processes and the Minimax web UI spend from
-the same budget, so a server-side rejection always outranks local state.
+the same budget. A server-side rejection (429) is recorded per Budget instance
+and does not travel through a shared store: each process learns about a rate
+limit from its own rejection and applies a local penalty.
 """
 
 from __future__ import annotations
@@ -26,7 +28,9 @@ class BudgetStore(Protocol):
 
     def append(self, timestamp: float) -> None: ...
 
-    def since(self, timestamp: float) -> list[float]: ...
+    def since(self, timestamp: float) -> list[float]:
+        """Return every recorded timestamp strictly greater than the given one, in any order."""
+        ...
 
     def prune(self, before: float) -> None: ...
 
@@ -80,14 +84,14 @@ class Budget:
         if len(daily) >= self._daily_limit:
             raise RateBudgetExceeded(
                 f"daily budget of {self._daily_limit} requests is spent",
-                retry_after=daily[0] + DAY_SECONDS - now,
+                retry_after=min(daily) + DAY_SECONDS - now,
             )
 
         monthly = self._store.since(now - MONTH_SECONDS)
         if len(monthly) >= self._monthly_limit:
             raise RateBudgetExceeded(
                 f"monthly budget of {self._monthly_limit} requests is spent",
-                retry_after=monthly[0] + MONTH_SECONDS - now,
+                retry_after=min(monthly) + MONTH_SECONDS - now,
             )
 
     def record(self) -> None:
@@ -95,5 +99,9 @@ class Budget:
         self._store.append(self._clock())
 
     def penalize(self, retry_after: float) -> None:
-        """Accept a server-side rate-limit verdict, overriding the local count."""
+        """Accept a server-side rate-limit verdict, blocking this Budget instance.
+
+        The penalty is applied only to this instance and does not travel through
+        a shared store, so sibling processes do not benefit from this knowledge.
+        """
         self._blocked_until = self._clock() + retry_after
