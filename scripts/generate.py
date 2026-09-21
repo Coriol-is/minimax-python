@@ -46,6 +46,7 @@ import argparse
 import json
 import re
 import sys
+import textwrap
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -264,6 +265,304 @@ def build_models(document: dict[str, Any]) -> str:
     return "\n".join(header + body)
 
 
+_PATH_PARAM = re.compile(r"\{([A-Za-z0-9_]+)\}")
+_HTTP_METHODS = ("get", "post", "put", "delete", "patch")
+
+
+def _operations(document: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten the Swagger paths into one record per operation, path order preserved."""
+    found = []
+    for path in document["paths"]:
+        item = document["paths"][path]
+        for method in _HTTP_METHODS:
+            if method in item:
+                found.append({"path": path, "method": method, "spec": item[method]})
+    return found
+
+
+def _path_suffix(path: str) -> str:
+    """The distinguishing tail of a path, e.g. `by_customer_id` or `by_code`.
+
+    Every path in this spec starts `/api/orgs/{organisationId}/<collection>...`,
+    so the first four segments (`api`, `orgs`, `{organisationId}`, the collection
+    name) never disambiguate a collision — only what follows the collection
+    segment does.
+    """
+    parts = []
+    segments = [s for s in path.split("/") if s]
+    for segment in segments[4:]:
+        match = _PATH_PARAM.fullmatch(segment)
+        if match:
+            parts.append(f"by_{snake_case(match.group(1))}")
+            continue
+        odata = re.fullmatch(r"([A-Za-z0-9]+)\(\{[A-Za-z0-9_]+\}\)", segment)
+        if odata:
+            parts.append(f"by_{snake_case(odata.group(1))}")
+            continue
+        parts.append(snake_case(segment))
+    return "_".join(parts)
+
+
+def _operation_id_to_snake_case(operation_id: str) -> str:
+    """`Customer_Get` -> `customer_get`.
+
+    `snake_case` inserts its own `_` before every capitalised word, so an
+    operationId that already contains a `_` (the vendor's own word separator)
+    comes out doubled (`customer__get`). Collapsing repeats afterwards is
+    only ever a no-op on `snake_case`'s other callers (property and parameter
+    names, which never contain `_`), so this is applied here rather than
+    inside the shared helper.
+    """
+    return re.sub(r"_+", "_", snake_case(operation_id))
+
+
+def operation_names(document: dict[str, Any]) -> list[str]:
+    """Deterministic function names, disambiguated where operationIds collide.
+
+    A colliding operationId (e.g. `Customer_Get`, reused by the collection, the
+    by-ID and the by-code routes) is disambiguated by its path tail. That alone
+    would leave `Customer_Put` and `Customer_Delete` bare (each operationId is
+    individually unique — only `Customer_Get` repeats), even though they sit on
+    the exact same `{customerId}` route as the now-suffixed GET. Since callers
+    read a resource's operations as a set, silently mixing bare and suffixed
+    names across siblings on one URL would be worse than the extra length, so
+    a route that hosts any colliding operationId gets its suffix applied to
+    every operation on it, not only the colliding one.
+    """
+    operations = _operations(document)
+    candidates = [_operation_id_to_snake_case(op["spec"]["operationId"]) for op in operations]
+    counts = Counter(candidates)
+
+    colliding_paths = {
+        operation["path"]
+        for operation, candidate in zip(operations, candidates, strict=True)
+        if counts[candidate] > 1
+    }
+
+    names = []
+    for operation, candidate in zip(operations, candidates, strict=True):
+        if counts[candidate] == 1 and operation["path"] not in colliding_paths:
+            names.append(candidate)
+            continue
+        suffix = _path_suffix(operation["path"])
+        names.append(f"{candidate}_{suffix}" if suffix else candidate)
+
+    duplicates = [name for name, count in Counter(names).items() if count > 1]
+    if duplicates:
+        raise SystemExit(f"operation names are not unique: {duplicates}")
+    return names
+
+
+_BUILTIN_ANNOTATION_WORDS = {"list", "int", "str", "float", "bool", "None", "Any", "SearchResult"}
+
+
+def _model_names(annotation: str) -> set[str]:
+    """Generated model class names referenced by a type annotation.
+
+    Handles compound annotations (`SearchResult[CustomerSearch]`,
+    `list[InboxAttachment]`), not just a single bare class name.
+    """
+    return {
+        word
+        for word in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", annotation)
+        if word not in _BUILTIN_ANNOTATION_WORDS
+    }
+
+
+def _response_type(spec: dict[str, Any], collisions: set[str]) -> str | None:
+    for status in ("200", "201"):
+        schema = spec.get("responses", {}).get(status, {}).get("schema")
+        if not schema:
+            continue
+        ref = schema.get("$ref", "")
+        definition = ref.rsplit("/", 1)[-1]
+        envelope = re.fullmatch(r"SAOP\.API\.Models\.SearchResult\[(.+)\]", definition)
+        if envelope:
+            return f"SearchResult[{class_name(envelope.group(1), collisions=collisions)}]"
+        if definition:
+            return class_name(definition, collisions=collisions)
+    return None
+
+
+def _docstring_lines(method: str, path: str, operation_id: str) -> list[str]:
+    """The one-line docstring for an operation, wrapped across lines if it would
+    otherwise exceed the project's line-length limit (a handful of vendor paths
+    are long enough that `METHOD /path (operationId X).` alone does not fit)."""
+    sentence = f"`{method.upper()} {path}` (operationId `{operation_id}`)."
+    one_line = f'    """{sentence}"""'
+    if _fits(one_line):
+        return [one_line]
+    wrapped = textwrap.wrap(
+        sentence,
+        width=_MAX_LINE_LENGTH,
+        initial_indent='    """',
+        subsequent_indent="    ",
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return [*wrapped, '    """']
+
+
+def _wrap_path_argument(path: str, *, indent: str) -> list[str]:
+    """Split a long `f"..."` path argument at `/` boundaries into adjacent string
+    literals, which Python concatenates implicitly. Never splits inside a `{param}`.
+    """
+    budget = _MAX_LINE_LENGTH - len(indent) - len('f""')
+    segments = path.split("/")
+    chunks: list[str] = []
+    current = ""
+    for index, segment in enumerate(segments):
+        piece = segment if index == 0 else f"/{segment}"
+        if current and len(current) + len(piece) > budget:
+            chunks.append(current)
+            current = piece
+        else:
+            current += piece
+    chunks.append(current)
+    lines = [f'{indent}f"{chunk}"' for chunk in chunks]
+    lines[-1] += ","
+    return lines
+
+
+def _call_lines(
+    method: str,
+    interpolated_path: str,
+    *,
+    has_params: bool,
+    body_type: str | None,
+    bind_response: bool,
+) -> list[str]:
+    """The `transport.request(...)` call, wrapped across lines if it would
+    otherwise exceed the project's line-length limit (routes with a body
+    parameter regularly do)."""
+    if "{" in interpolated_path:
+        path_literal = f'f"{interpolated_path}"'
+    else:
+        path_literal = f'"{interpolated_path}"'
+    args = [f'"{method.upper()}"', path_literal]
+    if has_params:
+        args.append("params=params")
+    if body_type and body_type.startswith("list["):
+        args.append("json=[item.model_dump(by_alias=True, exclude_none=True) for item in body]")
+    elif body_type:
+        args.append("json=body.model_dump(by_alias=True, exclude_none=True)")
+
+    target = "    response = " if bind_response else "    "
+    one_line = f'{target}transport.request({", ".join(args)})'
+    if _fits(one_line):
+        return [one_line]
+
+    lines = [f"{target}transport.request("]
+    for arg in args:
+        arg_line = f"        {arg},"
+        if _fits(arg_line):
+            lines.append(arg_line)
+        else:
+            # Only the interpolated path argument is long enough to land here.
+            lines.extend(_wrap_path_argument(interpolated_path, indent="        "))
+    lines.append("    )")
+    return lines
+
+
+def build_operations(document: dict[str, Any]) -> str:
+    collisions = find_collisions(document["definitions"])
+    operations = _operations(document)
+    names = operation_names(document)
+
+    used_models: set[str] = set()
+    bodies: list[str] = []
+
+    for operation, name in zip(operations, names, strict=True):
+        path, method, spec = operation["path"], operation["method"], operation["spec"]
+        parameters = spec.get("parameters", [])
+
+        signature = ["transport: Transport", "*"]
+        for parameter in parameters:
+            if parameter["in"] != "path":
+                continue
+            annotation = python_type(parameter, collisions)
+            signature.append(f"{snake_case(parameter['name'])}: {annotation}")
+
+        body_type = None
+        for parameter in parameters:
+            if parameter["in"] == "body":
+                body_type = python_type(parameter.get("schema", {}), collisions)
+                signature.append(f"body: {body_type}")
+                used_models.update(_model_names(body_type))
+
+        has_query = any(parameter["in"] == "query" for parameter in parameters)
+        has_params = method == "get" or has_query
+        if has_params:
+            signature.append("params: Mapping[str, Any] | None = None")
+
+        return_type = _response_type(spec, collisions)
+        if return_type:
+            used_models.update(_model_names(return_type))
+        elif method == "post":
+            return_type = "int | None"
+        else:
+            return_type = "None"
+
+        interpolated = _PATH_PARAM.sub(lambda m: "{" + snake_case(m.group(1)) + "}", path)
+        bind_response = return_type != "None"
+
+        lines = [
+            "",
+            "",
+            f"def {name}(",
+            "    " + ",\n    ".join(signature) + ",",
+            f") -> {return_type}:",
+            *_docstring_lines(method, path, spec["operationId"]),
+            *_call_lines(
+                method,
+                interpolated,
+                has_params=has_params,
+                body_type=body_type,
+                bind_response=bind_response,
+            ),
+        ]
+
+        if return_type.startswith("SearchResult["):
+            lines.append(f"    return {return_type}.model_validate(response.json)")
+        elif return_type == "int | None":
+            lines.append("    return response.location_id")
+        elif return_type == "None":
+            lines.append("    return None")
+        else:
+            lines.append(f"    return {return_type}.model_validate(response.json)")
+
+        bodies.extend(lines)
+
+    import_names = sorted((name for name in used_models if name != "Any"), key=str.casefold)
+    header = [
+        '"""Operations generated from the Minimax Swagger document. Do not edit.',
+        "",
+        "One function per Swagger operation. Names come from the operationId; where",
+        "several operations share one operationId, the path tail disambiguates them",
+        "(`customer_get`, `customer_get_by_customer_id`, `customer_get_by_code`).",
+        "",
+        "Regenerate with `uv run python scripts/generate.py`.",
+        '"""',
+        "",
+        "from __future__ import annotations",
+        "",
+        "from collections.abc import Mapping",
+        "from typing import Any",
+        "",
+    ]
+    if import_names:
+        one_line = f"from minimax_api._generated.models import {', '.join(import_names)}"
+        if _fits(one_line):
+            header.append(one_line)
+        else:
+            header.append("from minimax_api._generated.models import (")
+            header.extend(f"    {name}," for name in import_names)
+            header.append(")")
+    header.append("from minimax_api.envelope import SearchResult")
+    header.append("from minimax_api.transport import Transport")
+    return "\n".join(header + bodies) + "\n"
+
+
 def newest_spec() -> Path:
     candidates = sorted(SPEC_DIR.glob("swagger-*.json"))
     if not candidates:
@@ -277,7 +576,10 @@ def main() -> int:
     args = parser.parse_args()
 
     document = json.loads(newest_spec().read_text())
-    outputs = {OUT_DIR / "models.py": build_models(document)}
+    outputs = {
+        OUT_DIR / "models.py": build_models(document),
+        OUT_DIR / "operations.py": build_operations(document),
+    }
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     init = OUT_DIR / "__init__.py"
