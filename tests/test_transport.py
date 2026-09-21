@@ -227,3 +227,23 @@ def test_location_id_with_fragment() -> None:
 def test_location_id_from_path_with_no_digits() -> None:
     response = Response(status_code=201, json=None, headers={"Location": "/customers/created"})
     assert response.location_id is None
+
+
+def test_transport_refuses_to_send_when_the_budget_is_spent() -> None:
+    from minimax_api.budget import Budget
+    from minimax_api.errors import RateBudgetExceeded
+
+    now = [1000.0]
+    budget = Budget(clock=lambda: now[0], daily_limit=1)
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    transport = make_transport(handler, budget=budget)
+    transport.request("GET", "/api/orgs/97271/customers")
+
+    with pytest.raises(RateBudgetExceeded):
+        transport.request("GET", "/api/orgs/97271/customers")
+    assert len(calls) == 1
