@@ -33,11 +33,31 @@ def newest_spec() -> Path:
 
 def fetch() -> str:
     import ssl
+
+    # Some Python builds cannot verify moj.minimax.rs against their default
+    # certificate store, while certifi's bundle works reliably. If certifi is
+    # available, use its trust store; otherwise use the system default. This
+    # remains optional to avoid adding a runtime dependency.
     context = ssl.create_default_context()
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
-    with urllib.request.urlopen(SPEC_URL, timeout=60, context=context) as response:
-        document = json.loads(response.read().decode("utf-8"))
+    try:
+        import certifi
+
+        context = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        pass
+
+    try:
+        with urllib.request.urlopen(SPEC_URL, timeout=60, context=context) as response:
+            document = json.loads(response.read().decode("utf-8"))
+    except ssl.SSLCertVerificationError as e:
+        raise SystemExit(
+            f"certificate verification failed: {e}\n"
+            "The certificate chain for moj.minimax.rs could not be verified "
+            "against your system's trust store.\n"
+            "Try running with certifi available: "
+            "uv run --with certifi python scripts/refresh_spec.py"
+        ) from e
+
     return json.dumps(document, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
 
 
