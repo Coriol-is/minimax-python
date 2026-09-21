@@ -145,6 +145,25 @@ def test_pagination_stops_when_a_page_comes_back_empty() -> None:
     assert len(calls) == 1
 
 
+def test_pagination_keeps_going_when_total_rows_is_missing() -> None:
+    # A missing TotalRows used to default to 0, so `seen (>0) >= total_rows
+    # (0)` stopped after the very first page -- silently truncating the
+    # collection whenever an endpoint omits the field. Missing must mean
+    # "unknown", so paging continues until a page actually comes back empty.
+    pages = {
+        "1": {"Rows": [{"ID": 1}, {"ID": 2}], "CurrentPageNumber": 1, "PageSize": 2},
+        "2": {"Rows": [{"ID": 3}], "CurrentPageNumber": 2, "PageSize": 2},
+        "3": {"Rows": [], "CurrentPageNumber": 3, "PageSize": 2},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = request.url.params.get("CurrentPage", "1")
+        return httpx.Response(200, json=pages[page])
+
+    rows = list(paginate(make_transport(handler), "/api/orgs/97271/customers", Row, page_size=2))
+    assert [row.id for row in rows] == [1, 2, 3]
+
+
 def test_pagination_handles_a_bare_list_response() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=[{"ID": 7}])

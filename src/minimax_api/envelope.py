@@ -26,6 +26,10 @@ class SearchResult(MinimaxModel, Generic[T]):  # noqa: UP046
     """`{Rows, TotalRows, CurrentPageNumber, PageSize}` — every collection response."""
 
     rows: list[T] = Field(default_factory=list, alias="Rows")
-    total_rows: int = Field(default=0, alias="TotalRows")
+    #: `None` means the server did not say -- treat that as unknown, not zero.
+    #: Defaulting this to 0 used to make `paginate` stop after the first page
+    #: whenever an endpoint omitted `TotalRows`, silently truncating the
+    #: collection.
+    total_rows: int | None = Field(default=None, alias="TotalRows")
     current_page_number: int = Field(default=1, alias="CurrentPageNumber")
     page_size: int = Field(default=0, alias="PageSize")

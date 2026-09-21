@@ -52,6 +52,8 @@ def paginate(  # noqa: UP047
         yield from result.rows
         seen += len(result.rows)
 
-        if seen >= result.total_rows:
+        # A missing TotalRows means "unknown", not zero -- keep paging until a
+        # page comes back empty rather than stopping after the first one.
+        if result.total_rows is not None and seen >= result.total_rows:
             return
         page_number += 1
