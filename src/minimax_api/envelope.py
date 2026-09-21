@@ -9,28 +9,17 @@ from pydantic import BaseModel, ConfigDict, Field
 T = TypeVar("T")
 
 
-def to_minimax_case(field_name: str) -> str:
-    """Convert snake_case to Minimax case.
-
-    Single-letter fields become uppercase (id -> ID).
-    Multi-letter fields become PascalCase (total_rows -> TotalRows).
-    """
-    if field_name == "id":
-        return "ID"
-    parts = field_name.split("_")
-    return "".join(part.capitalize() for part in parts)
-
-
 class MinimaxModel(BaseModel):
     """Base for every model, generated or hand-written.
 
-    Minimax field names are PascalCase; Python attributes are snake_case, and
-    aliases bridge the two. Unknown fields are kept rather than rejected: the
-    vendor adds fields without warning, and a strict model would turn that into
-    a caller's outage.
+    Minimax field names are PascalCase; Python attributes are snake_case. Wire
+    names are always declared explicitly using `Field(alias=...)` on every field
+    — never inferred. Unknown fields are kept rather than rejected: the vendor
+    adds fields without warning, and a strict model would turn that into a
+    caller's outage.
     """
 
-    model_config = ConfigDict(populate_by_name=True, extra="allow", alias_generator=to_minimax_case)
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
 
 class SearchResult(MinimaxModel, Generic[T]):  # noqa: UP046

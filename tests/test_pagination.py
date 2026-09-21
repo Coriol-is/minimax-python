@@ -1,6 +1,7 @@
 from collections.abc import Callable
 
 import httpx
+from pydantic import Field
 
 from minimax_api.envelope import MinimaxModel, SearchResult
 from minimax_api.pagination import DEFAULT_PAGE_SIZE, paginate
@@ -9,7 +10,7 @@ from minimax_api.transport import Transport
 
 
 class Row(MinimaxModel):
-    id: int
+    id: int = Field(alias="ID")
     name: str | None = None
 
 
