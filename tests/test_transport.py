@@ -1,4 +1,5 @@
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 import pytest
@@ -162,3 +163,67 @@ def test_unparseable_location_yields_none() -> None:
 def test_empty_body_parses_as_none() -> None:
     transport = make_transport(lambda request: httpx.Response(204))
     assert transport.request("DELETE", "/api/orgs/97271/customers/1").json is None
+
+
+def test_401_refresh_does_not_consume_transport_retry_budget() -> None:
+    """With max_transport_retries=1, 401 followed by 200 succeeds (401 doesn't consume attempt)."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.headers["Authorization"])
+        if len(calls) == 1:
+            return httpx.Response(401, text="expired")
+        return httpx.Response(200, json={"ok": True})
+
+    transport = make_transport(handler, max_transport_retries=1)
+    assert transport.request("GET", "/api/orgs/97271/customers").json == {"ok": True}
+    assert len(calls) == 2
+    assert calls == ["Bearer token-1", "Bearer token-2"]
+
+
+def test_401_refresh_does_not_add_extra_transport_attempts() -> None:
+    """A 401 followed by two 5xx with max_transport_retries=2 still exhausts and raises."""
+    responses = [
+        httpx.Response(401, text="expired"),
+        httpx.Response(500, text="error1"),
+        httpx.Response(500, text="error2"),
+    ]
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return responses.pop(0)
+
+    transport = make_transport(handler, max_transport_retries=2)
+    with pytest.raises(TransportError):
+        transport.request("GET", "/api/orgs/97271/customers")
+    assert len(calls) == 3
+
+
+def test_location_id_from_trailing_slash_url() -> None:
+    headers = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/97271/customers/4242/"}
+    response = Response(status_code=201, json=None, headers=headers)
+    assert response.location_id == 4242
+
+
+def test_location_id_from_query_string_url() -> None:
+    headers = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/97271/customers/4242?foo=bar"}
+    response = Response(status_code=201, json=None, headers=headers)
+    assert response.location_id == 4242
+
+
+def test_location_id_from_relative_path() -> None:
+    headers = {"Location": "/RS/API/api/orgs/97271/customers/4242"}
+    response = Response(status_code=201, json=None, headers=headers)
+    assert response.location_id == 4242
+
+
+def test_location_id_with_fragment() -> None:
+    headers = {"Location": "https://example.com/customers/4242#section"}
+    response = Response(status_code=201, json=None, headers=headers)
+    assert response.location_id == 4242
+
+
+def test_location_id_from_path_with_no_digits() -> None:
+    response = Response(status_code=201, json=None, headers={"Location": "/customers/created"})
+    assert response.location_id is None

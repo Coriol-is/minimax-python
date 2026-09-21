@@ -45,7 +45,9 @@ class Response:
         location = self.headers.get("Location") or self.headers.get("location")
         if not location:
             return None
-        match = _LOCATION_ID.search(location)
+        # Remove query string and fragment, then strip trailing slashes
+        path = location.split("?")[0].split("#")[0].rstrip("/")
+        match = _LOCATION_ID.search(path)
         return int(match.group(1)) if match else None
 
 
@@ -80,9 +82,15 @@ class Transport:
         json: Any | None = None,
     ) -> Response:
         url = f"{self._region.base_url}{path}"
+        attempts = 0
         refreshed = False
 
-        for attempt in range(self._max_transport_retries):
+        while True:
+            if attempts >= self._max_transport_retries:
+                raise TransportError(
+                    f"{method} {path} exhausted {self._max_transport_retries} transport attempts"
+                )
+
             if self._budget is not None:
                 self._budget.check()
 
@@ -92,10 +100,9 @@ class Transport:
             }
             try:
                 raw = self._http.request(method, url, params=params, json=json, headers=headers)
-            except httpx.HTTPError as error:
-                if attempt == self._max_transport_retries - 1:
-                    raise TransportError(f"{method} {path} failed: {error}") from error
-                self._sleep(self._backoff_base * (2**attempt))
+            except httpx.HTTPError:
+                self._sleep(self._backoff_base * (2**attempts))
+                attempts += 1
                 continue
 
             if self._budget is not None:
@@ -106,6 +113,7 @@ class Transport:
                     # The token expired mid-flight. This is not a credential
                     # rejection: the token endpoint is the only place that judges
                     # credentials, and it has its own terminal handling.
+                    # This path does NOT consume a transport attempt.
                     refreshed = True
                     self._auth.invalidate()
                     continue
@@ -114,14 +122,11 @@ class Transport:
                     raise TransportError(f"{method} {path} returned HTTP 401 after token refresh")
 
             if raw.status_code >= 500:
-                if attempt == self._max_transport_retries - 1:
-                    raise TransportError(f"{method} {path} returned HTTP {raw.status_code}")
-                self._sleep(self._backoff_base * (2**attempt))
+                self._sleep(self._backoff_base * (2**attempts))
+                attempts += 1
                 continue
 
             return self._interpret(method, path, raw)
-
-        raise TransportError(f"{method} {path} exhausted {self._max_transport_retries} attempts")
 
     def _interpret(self, method: str, path: str, raw: httpx.Response) -> Response:
         payload = self._decode(raw)
