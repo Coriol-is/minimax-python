@@ -2,6 +2,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from generate import build_operations, operation_names  # noqa: E402
@@ -138,3 +140,94 @@ def test_body_is_serialised_with_vendor_field_names() -> None:
 
 def test_generated_operations_compile() -> None:
     compile(build_operations(MINI_SPEC), "<generated>", "exec")
+
+
+def test_operation_names_raises_on_a_collision_path_suffixing_cannot_break() -> None:
+    """A collision the naming rule cannot resolve must fail loudly, not merge names.
+
+    Both operations here share the operationId `Foo_Get`, so both are eligible
+    for path-tail disambiguation — but their path tails are identical
+    (`{fooId}` is the only segment after the collection segment in each path;
+    the differing collection literals `foo`/`bar` are not part of the
+    suffix), so disambiguation produces `foo_get_by_foo_id` for both. This
+    deliberately constructed collision must raise, exactly like
+    `test_build_models_refuses_to_silently_merge_colliding_names` pins the
+    equivalent failure mode for `build_models`. If the final uniqueness
+    assertion in `operation_names` were ever removed or weakened, this test
+    would fail because no `SystemExit` is raised.
+    """
+    spec: dict[str, Any] = {
+        "definitions": {},
+        "paths": {
+            "/api/orgs/{organisationId}/foo/{fooId}": {
+                "get": {
+                    "operationId": "Foo_Get",
+                    "parameters": [
+                        {
+                            "name": "organisationId",
+                            "in": "path",
+                            "required": True,
+                            "type": "integer",
+                        },
+                        {"name": "fooId", "in": "path", "required": True, "type": "integer"},
+                    ],
+                    "responses": {"200": {"description": "OK"}},
+                },
+            },
+            "/api/orgs/{organisationId}/bar/{fooId}": {
+                "get": {
+                    "operationId": "Foo_Get",
+                    "parameters": [
+                        {
+                            "name": "organisationId",
+                            "in": "path",
+                            "required": True,
+                            "type": "integer",
+                        },
+                        {"name": "fooId", "in": "path", "required": True, "type": "integer"},
+                    ],
+                    "responses": {"200": {"description": "OK"}},
+                },
+            },
+        },
+    }
+    with pytest.raises(SystemExit, match="foo_get_by_foo_id"):
+        operation_names(spec)
+
+
+def test_build_operations_refuses_an_array_body_of_primitives() -> None:
+    """An array body must fail at generation time if its items are not a model.
+
+    `_call_lines` serialises an array body with
+    `[item.model_dump(...) for item in body]`, which only works when each
+    item is a generated pydantic model. A `POST` whose body is an array of
+    plain strings would otherwise generate code that raises `AttributeError`
+    on the first real call — a customer-facing crash instead of a build
+    failure. `build_operations` must refuse to generate it at all.
+    """
+    spec: dict[str, Any] = {
+        "definitions": {},
+        "paths": {
+            "/api/orgs/{organisationId}/tags": {
+                "post": {
+                    "operationId": "Tag_Post",
+                    "parameters": [
+                        {
+                            "name": "organisationId",
+                            "in": "path",
+                            "required": True,
+                            "type": "integer",
+                        },
+                        {
+                            "name": "tags",
+                            "in": "body",
+                            "schema": {"type": "array", "items": {"type": "string"}},
+                        },
+                    ],
+                    "responses": {"200": {"description": "OK"}},
+                },
+            },
+        },
+    }
+    with pytest.raises(SystemExit, match="Tag_Post"):
+        build_operations(spec)

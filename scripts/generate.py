@@ -355,6 +355,13 @@ def operation_names(document: dict[str, Any]) -> list[str]:
 
 _BUILTIN_ANNOTATION_WORDS = {"list", "int", "str", "float", "bool", "None", "Any", "SearchResult"}
 
+#: `python_type`'s possible outputs for anything that is not a `$ref` to a
+#: generated model. An array body whose item type is one of these cannot be
+#: serialised by `_call_lines`'s `item.model_dump(...)` comprehension, so
+#: `build_operations` refuses to generate such an operation (see its body-type
+#: check) rather than emitting a call that fails at runtime on the first item.
+_PRIMITIVE_ANNOTATIONS = {"int", "str", "float", "bool", "Any"}
+
 
 def _model_names(annotation: str) -> set[str]:
     """Generated model class names referenced by a type annotation.
@@ -487,6 +494,17 @@ def build_operations(document: dict[str, Any]) -> str:
         for parameter in parameters:
             if parameter["in"] == "body":
                 body_type = python_type(parameter.get("schema", {}), collisions)
+                if body_type.startswith("list["):
+                    item_type = body_type.removeprefix("list[").removesuffix("]")
+                    if item_type in _PRIMITIVE_ANNOTATIONS:
+                        raise SystemExit(
+                            "generate.py: array body of primitive "
+                            f"{item_type!r} is not supported (operationId "
+                            f"{spec['operationId']!r}, {method.upper()} {path}). "
+                            "The generated call serialises each array item with "
+                            "`.model_dump(...)`, which only a generated model "
+                            "supports — extend `_call_lines` before regenerating."
+                        )
                 signature.append(f"body: {body_type}")
                 used_models.update(_model_names(body_type))
 
