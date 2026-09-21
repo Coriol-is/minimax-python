@@ -41,6 +41,12 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.12"
 strict = true
 files = ["src", "tests"]
+# Every generated model declares `populate_by_name=True` (via MinimaxModel) and
+# every field carries an explicit `Field(alias=...)`. Without this plugin, mypy
+# synthesizes constructor signatures from `dataclass_transform` using only the
+# alias, and rejects the Python-name keyword arguments this library's contract
+# explicitly allows. The plugin understands `populate_by_name` and accepts both.
+plugins = ["pydantic.mypy"]
 # `tests/test_generator_models.py` imports `generate` via a sys.path hack
 # (see that file) so it can test the generator without installing `scripts/`
 # as a package; this lets mypy resolve the same import.
