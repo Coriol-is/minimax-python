@@ -25,7 +25,7 @@ from minimax_api.errors import (
 from minimax_api.region import Region
 
 if TYPE_CHECKING:
-    from minimax_api.budget import Budget
+    from minimax_api.budget import Budget  # type: ignore[import-untyped]
 
 _LOCATION_ID = re.compile(r"/(\d+)\s*$")
 _CONCURRENCY_MARKER = "concurrency error"

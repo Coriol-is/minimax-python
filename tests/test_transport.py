@@ -1,7 +1,8 @@
+from typing import Any, Callable
+
 import httpx
 import pytest
 
-from minimax_api.auth import Authenticator, Credentials, Token
 from minimax_api.errors import (
     ConcurrencyError,
     NotFoundError,
@@ -16,8 +17,8 @@ class StubAuth:
     """Stands in for Authenticator; counts how often the token was invalidated."""
 
     def __init__(self) -> None:
-        self.invalidations = 0
-        self.tokens = ["token-1", "token-2"]
+        self.invalidations: int = 0
+        self.tokens: list[str] = ["token-1", "token-2"]
 
     def access_token(self) -> str:
         return self.tokens[min(self.invalidations, len(self.tokens) - 1)]
@@ -26,19 +27,21 @@ class StubAuth:
         self.invalidations += 1
 
 
-def make_transport(handler, **kwargs):
+def make_transport(
+    handler: Callable[[httpx.Request], httpx.Response], **kwargs: Any
+) -> Transport:
     http = httpx.Client(transport=httpx.MockTransport(handler))
     return Transport(
         region=RS,
-        authenticator=StubAuth(),
+        authenticator=StubAuth(),  # type: ignore[arg-type]
         http=http,
         sleep=lambda seconds: None,
         **kwargs,
     )
 
 
-def test_get_builds_the_url_and_sends_the_bearer_token():
-    seen = {}
+def test_get_builds_the_url_and_sends_the_bearer_token() -> None:
+    seen: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
@@ -55,7 +58,9 @@ def test_get_builds_the_url_and_sends_the_bearer_token():
 
 
 def test_404_becomes_not_found() -> None:
-    transport = make_transport(lambda request: httpx.Response(404, json={"Message": "no such thing"}))
+    transport = make_transport(
+        lambda request: httpx.Response(404, json={"Message": "no such thing"})
+    )
     with pytest.raises(NotFoundError):
         transport.request("GET", "/api/orgs/97271/customers/999")
 
