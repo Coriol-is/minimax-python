@@ -104,6 +104,13 @@ you persisting that ID, the record exists with no local trace. Record the intent
 calling and reconcile by search after an unknown outcome — that needs a database, which a client
 library has no business owning.
 
+One thing to know before you rely on that reconciliation: **Minimax's search methods filter on
+fewer fields than you might assume.** `GetIssuedInvoicePostings`, for instance, filters only on
+`DateFrom`, `DateTo`, `Description`, `Status` and `AnalyticID` — there is no document-number
+filter. So a reference you intend to search by later has to be written into a field the search
+actually accepts, typically `Description`. Decide that before your first write, not after your
+first lost response.
+
 ## Coverage
 
 All 178 operations of the Minimax API are generated from the vendor's public Swagger document

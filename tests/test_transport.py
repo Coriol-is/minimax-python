@@ -384,6 +384,17 @@ def test_concurrency_match_covers_row_version_with_a_space() -> None:
         transport.request("PUT", "/api/orgs/12345/customers/1", json={})
 
 
+def test_concurrency_match_covers_the_wording_support_described() -> None:
+    # Minimax support described the conflict to a sibling integration as an
+    # error "saying it does not hold the latest record" -- wording that shares
+    # no word with the obvious guesses. Until a real response is captured, this
+    # phrasing has as much claim to being the live one as the others.
+    body = {"Message": "The document does not hold the latest record."}
+    transport = make_transport(lambda request: httpx.Response(400, json=body))
+    with pytest.raises(ConcurrencyError):
+        transport.request("PUT", "/api/orgs/12345/customers/1", json={})
+
+
 # -- Budget undercounts retries: connect vs. read/timeout errors ------------
 
 

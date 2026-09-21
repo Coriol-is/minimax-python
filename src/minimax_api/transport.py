@@ -38,7 +38,15 @@ _LOCATION_ID = re.compile(r"/(\d+)\s*$")
 # used to match came from an invented test fixture, not a real one. These are
 # best-effort guesses at plausible wordings; replace this with a real
 # captured response the moment one exists, and narrow the match again.
-_CONCURRENCY_MARKERS = ("concurrency", "rowversion", "row version")
+#
+# One second-hand data point, from Minimax support (2026-09-21) describing the
+# behaviour to a sibling Odoo integration: "the second call fails with an error
+# saying it does not hold the latest record". That paraphrase contains none of
+# the words a naive guess would pick, which is why "latest record" is matched
+# too -- and why this whole list should be treated as a stopgap. Failing to
+# recognise a conflict is the expensive direction: the caller then sees a
+# plain ValidationError and may replay a stale write over someone else's edit.
+_CONCURRENCY_MARKERS = ("concurrency", "rowversion", "row version", "latest record")
 
 #: Methods whose repetition cannot create a duplicate side effect. Retrying
 #: any other method (POST, PATCH, ...) after an ambiguous outcome risks
