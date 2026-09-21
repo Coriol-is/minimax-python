@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 import httpx
@@ -35,25 +35,30 @@ class Credentials:
     """
 
     client_id: str
-    client_secret: str
+    client_secret: str = field(repr=False)
     username: str
-    password: str
+    password: str = field(repr=False)
 
 
 @dataclass(frozen=True)
 class Token:
     """An access token and the moment it stops being usable."""
 
-    access_token: str
+    access_token: str = field(repr=False)
     expires_at: float
 
 
 class TokenStore(Protocol):
     """Where a token lives between uses.
 
-    Implement this over a database so concurrent workers share one token. They
-    would otherwise race to refresh, and a single bad stored password
-    multiplied across workers reaches the lockout threshold in one burst.
+    Implement this over a database so concurrent workers share one token,
+    preventing concurrent token requests. They would otherwise race to refresh,
+    and a single bad stored password multiplied across workers reaches the
+    lockout threshold in one burst.
+
+    Note: the lockout latch is per-Authenticator instance and does not travel
+    through the store. A new Authenticator instance constructed with bad
+    credentials will issue its own token request and receive its own latch.
     """
 
     def get(self) -> Token | None: ...
@@ -110,7 +115,7 @@ class Authenticator:
 
     def invalidate(self) -> None:
         """Drop the cached token, e.g. after an API call answered 401."""
-        self._store.set(Token(access_token="", expires_at=0.0))
+        self._store.set(Token(access_token="", expires_at=float("-inf")))
 
     def _request_token(self) -> Token:
         form = {

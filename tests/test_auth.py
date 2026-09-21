@@ -164,3 +164,37 @@ def test_store_round_trips_a_token() -> None:
     token = Token(access_token="abc", expires_at=4600.0)
     store.set(token)
     assert store.get() == token
+
+
+def test_credentials_repr_hides_secrets() -> None:
+    creds = Credentials(
+        client_id="my-client",
+        client_secret="super-secret",
+        username="user123",
+        password="password-secret",
+    )
+    creds_repr = repr(creds)
+    assert "my-client" in creds_repr
+    assert "user123" in creds_repr
+    assert "super-secret" not in creds_repr
+    assert "password-secret" not in creds_repr
+
+
+def test_token_repr_hides_access_token() -> None:
+    token = Token(access_token="secret-token", expires_at=5000.0)
+    token_repr = repr(token)
+    assert "5000" in token_repr
+    assert "secret-token" not in token_repr
+
+
+def test_credential_rejection_error_message_hides_credentials() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": "invalid_grant"})
+
+    auth = make_auth(handler)
+    with pytest.raises(MinimaxAuthError) as raised:
+        auth.access_token()
+    error_message = str(raised.value)
+    assert "password" not in error_message.lower()
+    assert "secret" not in error_message.lower()
+    assert "invalid_grant" not in error_message
