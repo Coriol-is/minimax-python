@@ -12,6 +12,8 @@ First release.
 - Pagination over the `{Rows, TotalRows, CurrentPageNumber, PageSize}` envelope.
 - 90 generated pydantic models and 178 generated operations.
 - Hand-written facades for code lists, customers, and issued invoices.
+- Ships a `py.typed` marker (PEP 561): the wheel is typed, so a consumer's own mypy checks
+  against `minimax_api`'s public models and client instead of treating the package as untyped.
 
 API surface as of **2026-09-21** (`spec/swagger-2026-09-21.json`): 120 paths, 178 operations,
 127 definitions.
