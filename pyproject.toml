@@ -41,6 +41,10 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.12"
 strict = true
 files = ["src", "tests"]
+# `tests/test_generator_models.py` imports `generate` via a sys.path hack
+# (see that file) so it can test the generator without installing `scripts/`
+# as a package; this lets mypy resolve the same import.
+mypy_path = ["scripts"]
 
 [[tool.mypy.overrides]]
 # Generated code is checked, but its dynamic construction defeats some inference.
