@@ -34,6 +34,8 @@ with MinimaxClient(
 
     rsd = client.codelists.currency_by_code("RSD")
     serbia = client.codelists.country_by_code("RS")
+    if rsd is None or serbia is None:
+        raise RuntimeError("this organisation's code lists do not contain RSD or RS")
 
     customer_id = client.customers.create(
         Customer(
