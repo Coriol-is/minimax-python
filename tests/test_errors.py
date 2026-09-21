@@ -1,6 +1,7 @@
 import pytest
 
 from minimax_api.errors import (
+    AmbiguousWriteError,
     ConcurrencyError,
     MinimaxAuthError,
     MinimaxError,
@@ -19,6 +20,7 @@ def test_every_error_descends_from_minimax_error() -> None:
         NotFoundError,
         ValidationError,
         TransportError,
+        AmbiguousWriteError,
     ):
         assert issubclass(cls, MinimaxError)
 
@@ -64,3 +66,9 @@ def test_not_found_is_not_retryable() -> None:
 def test_errors_can_be_caught_by_base_class() -> None:
     with pytest.raises(MinimaxError):
         raise NotFoundError("no such customer")
+
+
+def test_ambiguous_write_error_is_not_retryable() -> None:
+    # The whole point: a caller must never resend the same payload just
+    # because this type looks similar to TransportError.
+    assert AmbiguousWriteError("outcome unknown").retryable is False

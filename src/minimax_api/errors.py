@@ -69,3 +69,21 @@ class TransportError(MinimaxError):
     """A timeout, connection failure, or 5xx. Safe to retry."""
 
     retryable = True
+
+
+class AmbiguousWriteError(MinimaxError):
+    """A non-idempotent write's outcome could not be confirmed.
+
+    Raised instead of retrying a POST that hit a connection failure, a
+    timeout, or a 5xx: the request may have reached Minimax and committed, or
+    it may not have. Retrying blind risks a duplicate document; reporting
+    success would be a lie. It is also raised when Minimax *did* answer
+    success but omitted the `Location` header a create is supposed to carry,
+    so the new record's ID cannot be read back — the record still exists.
+
+    Never resend the same payload. Reconcile by searching for the record
+    using whatever business reference identifies it (order number, invoice
+    number, ...), and only create a new one if that search comes up empty.
+    """
+
+    retryable = False
