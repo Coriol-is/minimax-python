@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -6,7 +7,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from generate import build_models, class_name, snake_case  # noqa: E402
+from generate import (  # noqa: E402
+    build_models,
+    class_name,
+    find_collisions,
+    newest_spec,
+    snake_case,
+)
 
 
 @pytest.mark.parametrize(
@@ -41,6 +48,91 @@ def test_colliding_leaf_names_get_their_parent_segment() -> None:
     collisions = {"Chart"}
     assert class_name("SAOP.API.Models.Dashboard.Chart", collisions=collisions) == "DashboardChart"
     assert class_name("SAOP.API.Models.Report.Chart", collisions=collisions) == "ReportChart"
+
+
+# The real spec has two collision shapes the brief's own naming table didn't
+# fully cover: generic definitions (`Base[Param]`) that collide on `Base`
+# while sharing the same parent namespace segment too. Disambiguating those
+# by the *parent segment* (as non-generic collisions are) would leave them
+# colliding; the generator instead uses the type parameter's leaf name. This
+# once silently collapsed three `Chart[...]` definitions and two
+# `ListResult[...]` definitions onto one class name each — the tests below
+# pin the fix so a future change to the rule shows up as a visible diff, and
+# `test_build_models_refuses_to_silently_merge_colliding_names` pins the
+# fallback (`SystemExit`) for whatever collision shape the rule doesn't cover.
+def test_generic_family_collisions_are_disambiguated_by_type_parameter() -> None:
+    document = json.loads(newest_spec().read_text())
+    definitions = document["definitions"]
+    collisions = find_collisions(definitions)
+
+    expected = {
+        "SAOP.API.Models.Dashboard.Chart[SAOP.API.Models.Dashboard.AgregateInvoice]": (
+            "AgregateInvoiceChart"
+        ),
+        "SAOP.API.Models.Dashboard.Chart[SAOP.API.Models.Dashboard.DashboardCustomer]": (
+            "DashboardCustomerChart"
+        ),
+        "SAOP.API.Models.Dashboard.Chart[SAOP.API.Models.Dashboard.DashboardMonth]": (
+            "DashboardMonthChart"
+        ),
+        "SAOP.API.Models.IssuedInvoice.PaymentMethodSearch": "IssuedInvoicePaymentMethodSearch",
+        "SAOP.API.Models.IssuedInvoicePosting.PaymentMethodSearch": (
+            "IssuedInvoicePostingPaymentMethodSearch"
+        ),
+        "SAOP.API.Models.PaymentMethod.PaymentMethodSearch": "PaymentMethodPaymentMethodSearch",
+        "SAOP.API.Models.ListResult[SAOP.API.Models.Item.ItemData]": "ItemDataListResult",
+        "SAOP.API.Models.ListResult[SAOP.API.Models.Item.ItemPriceListItem]": (
+            "ItemPriceListItemListResult"
+        ),
+    }
+    for definition, expected_name in expected.items():
+        assert definition in definitions, (
+            f"fixture is stale: {definition!r} not in the committed spec"
+        )
+        assert class_name(definition, collisions=collisions) == expected_name
+
+
+def test_real_spec_definitions_map_injectively_to_class_names() -> None:
+    """Every non-`SearchResult` definition must get its own, distinct class name.
+
+    This is the general guard behind the specific names pinned above: if the
+    naming rule ever regresses on some other collision the current spec
+    doesn't exercise, this fails without needing a name added to a fixture.
+    """
+    document = json.loads(newest_spec().read_text())
+    definitions = document["definitions"]
+    collisions = find_collisions(definitions)
+
+    non_search = [d for d in definitions if not d.startswith("SAOP.API.Models.SearchResult[")]
+    names = [class_name(d, collisions=collisions) for d in non_search]
+
+    assert len(non_search) == 90
+    assert len(names) == len(set(names)), "naming rule produced duplicate class names"
+    assert len(non_search) == len(set(names))
+
+
+def test_build_models_refuses_to_silently_merge_colliding_names() -> None:
+    """A collision the naming rule cannot break must fail loudly, not merge classes.
+
+    Two generic families in different namespaces sharing both their base leaf
+    name and their type parameter's leaf name is the documented, known gap in
+    the rule (see the module docstring in `scripts/generate.py`): both
+    `Foo.Widget[Foo.Bar]` and `Baz.Widget[Foo.Bar]` resolve to `BarWidget`.
+    """
+    spec: dict[str, Any] = {
+        "definitions": {
+            "SAOP.API.Models.Foo.Widget[SAOP.API.Models.Foo.Bar]": {
+                "type": "object",
+                "properties": {},
+            },
+            "SAOP.API.Models.Baz.Widget[SAOP.API.Models.Foo.Bar]": {
+                "type": "object",
+                "properties": {},
+            },
+        }
+    }
+    with pytest.raises(SystemExit, match="BarWidget"):
+        build_models(spec)
 
 
 MINI_SPEC: dict[str, Any] = {

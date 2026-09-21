@@ -6,6 +6,35 @@ report on what Minimax changed, consumers do not need this script installed,
 and IDE navigation works. Never hand-edit the output — change this script and
 regenerate.
 
+Naming rule (`class_name`):
+  - `SAOP.API.Common.mMApiFkField` is renamed `FkField` (`SPECIAL_CLASS_NAMES`);
+    every other definition keeps its vendor leaf name (the segment after the
+    last `.`, generic parameter stripped).
+  - If a leaf name is unique among all non-`SearchResult[...]` definitions, it
+    is used as-is.
+  - If it collides with another definition's leaf name, it is disambiguated:
+      * Generic definitions (`Namespace.Base[Namespace.Param]`) are
+        disambiguated by their type PARAMETER's leaf name, e.g. three
+        `Dashboard.Chart[...]` widgets become `AgregateInvoiceChart`,
+        `DashboardCustomerChart`, `DashboardMonthChart`. The parent namespace
+        segment is *not* used here because colliding generic instantiations
+        of the same base are typically declared in the same namespace, so the
+        segment would be identical for all of them and would not break the
+        tie (this happened once: three `Chart[...]` widgets and two
+        `ListResult[...]` instantiations collapsed onto one class name each,
+        silently dropping two definitions — see git history on this file).
+      * Non-generic definitions are disambiguated by prefixing the preceding
+        namespace segment, e.g. `Dashboard.Chart` / `Report.Chart` ->
+        `DashboardChart` / `ReportChart`.
+  - Known limitation: two generic families in *different* namespaces that
+    share both their base leaf name and their type parameter's leaf name
+    would still collide (e.g. `Foo.Widget[Foo.Bar]` and `Baz.Widget[Foo.Bar]`
+    both resolve to `BarWidget`). No such case exists in the spec this
+    generator has been run against. Rather than silently merging two
+    definitions into one class again, `build_models` fails loudly
+    (`SystemExit`) if the naming rule ever produces a duplicate class name —
+    see `tests/test_generator_models.py` for the tests that pin this.
+
 Usage:
     uv run python scripts/generate.py
     uv run python scripts/generate.py --check   # exit 1 if the committed output is stale
@@ -157,12 +186,17 @@ def build_models(document: dict[str, Any]) -> str:
 
     body: list[str] = []
     class_names: list[str] = []
+    #: Every definition that produced a given class name, so a collision the
+    #: naming rule failed to break can be reported precisely instead of one
+    #: definition silently overwriting another's class.
+    sources_by_name: dict[str, list[str]] = {}
     for definition in sorted(definitions):
         if definition.startswith("SAOP.API.Models.SearchResult["):
             continue
         schema = definitions[definition]
         name = class_name(definition, collisions=collisions)
         class_names.append(name)
+        sources_by_name.setdefault(name, []).append(definition)
         properties: dict[str, Any] = schema.get("properties", {})
 
         body.append("")
@@ -174,6 +208,21 @@ def build_models(document: dict[str, Any]) -> str:
             continue
         for prop, prop_schema in properties.items():
             body.append(field_line(prop, prop_schema, collisions))
+
+    # A naming-rule gap must never fall back to Python's "last definition
+    # wins" class redefinition: that is exactly how a 3-way and a 2-way
+    # collision were once silently collapsed into one class each (see the
+    # module docstring). Anything not fully disambiguated by `class_name`
+    # is a bug in the naming rule, and generation must fail loudly on it.
+    duplicates = {n: s for n, s in sources_by_name.items() if len(s) > 1}
+    if duplicates:
+        report = "; ".join(
+            f"{name!r} <- {', '.join(sources)}" for name, sources in sorted(duplicates.items())
+        )
+        raise SystemExit(
+            "generate.py: naming rule produced duplicate class name(s), "
+            f"which would silently merge distinct definitions: {report}"
+        )
 
     # `from __future__ import annotations` makes every annotation a lazily
     # evaluated string, so a class referencing another one declared later
