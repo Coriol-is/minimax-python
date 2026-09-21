@@ -574,7 +574,7 @@ class Region:
     scope: str
 
 
-#: Serbia. Verified against organisation 97271 on 2026-09-21.
+#: Serbia. Verified against a live RS organisation on 2026-09-21.
 RS = Region(
     code="RS",
     base_url="https://moj.minimax.rs/RS/API",
@@ -826,9 +826,9 @@ def test_get_builds_the_url_and_sends_the_bearer_token():
         return httpx.Response(200, json={"Rows": []})
 
     transport = make_transport(handler)
-    response = transport.request("GET", "/api/orgs/97271/customers", params={"PageSize": 300})
+    response = transport.request("GET", "/api/orgs/12345/customers", params={"PageSize": 300})
 
-    assert seen["url"] == "https://moj.minimax.rs/RS/API/api/orgs/97271/customers?PageSize=300"
+    assert seen["url"] == "https://moj.minimax.rs/RS/API/api/orgs/12345/customers?PageSize=300"
     assert seen["auth"] == "Bearer token-1"
     assert response.status_code == 200
     assert response.json == {"Rows": []}
@@ -837,21 +837,21 @@ def test_get_builds_the_url_and_sends_the_bearer_token():
 def test_404_becomes_not_found():
     transport = make_transport(lambda request: httpx.Response(404, json={"Message": "no such thing"}))
     with pytest.raises(NotFoundError):
-        transport.request("GET", "/api/orgs/97271/customers/999")
+        transport.request("GET", "/api/orgs/12345/customers/999")
 
 
 def test_concurrency_message_becomes_concurrency_error():
     body = {"Message": "Concurrency error - record changed by another action (RowVersion)"}
     transport = make_transport(lambda request: httpx.Response(400, json=body))
     with pytest.raises(ConcurrencyError):
-        transport.request("PUT", "/api/orgs/97271/customers/1", json={})
+        transport.request("PUT", "/api/orgs/12345/customers/1", json={})
 
 
 def test_other_4xx_becomes_validation_error_carrying_the_server_text():
     body = {"Message": "Name is required"}
     transport = make_transport(lambda request: httpx.Response(400, json=body))
     with pytest.raises(ValidationError) as raised:
-        transport.request("POST", "/api/orgs/97271/customers", json={})
+        transport.request("POST", "/api/orgs/12345/customers", json={})
     assert raised.value.status_code == 400
     assert raised.value.payload == body
 
@@ -865,7 +865,7 @@ def test_5xx_is_retried_then_succeeds():
         return responses.pop(0)
 
     transport = make_transport(handler)
-    assert transport.request("GET", "/api/orgs/97271/customers").json == {"ok": True}
+    assert transport.request("GET", "/api/orgs/12345/customers").json == {"ok": True}
     assert len(calls) == 2
 
 
@@ -878,7 +878,7 @@ def test_5xx_gives_up_after_the_retry_budget():
 
     transport = make_transport(handler, max_transport_retries=3)
     with pytest.raises(TransportError):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
     assert len(calls) == 3
 
 
@@ -892,7 +892,7 @@ def test_401_on_an_api_call_refreshes_the_token_once():
         return httpx.Response(200, json={"ok": True})
 
     transport = make_transport(handler)
-    assert transport.request("GET", "/api/orgs/97271/customers").json == {"ok": True}
+    assert transport.request("GET", "/api/orgs/12345/customers").json == {"ok": True}
     assert calls == ["Bearer token-1", "Bearer token-2"]
 
 
@@ -905,7 +905,7 @@ def test_repeated_401_does_not_loop_forever():
 
     transport = make_transport(handler)
     with pytest.raises(TransportError):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
     assert len(calls) == 2
 
 
@@ -915,13 +915,13 @@ def test_connection_error_is_a_transport_error():
 
     transport = make_transport(handler, max_transport_retries=2)
     with pytest.raises(TransportError):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
 
 
 def test_location_header_yields_the_created_id():
-    headers = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/97271/customers/4242"}
+    headers = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/12345/customers/4242"}
     transport = make_transport(lambda request: httpx.Response(201, headers=headers))
-    response = transport.request("POST", "/api/orgs/97271/customers", json={})
+    response = transport.request("POST", "/api/orgs/12345/customers", json={})
     assert response.location_id == 4242
 
 
@@ -936,7 +936,7 @@ def test_unparseable_location_yields_none():
 
 def test_empty_body_parses_as_none():
     transport = make_transport(lambda request: httpx.Response(204))
-    assert transport.request("DELETE", "/api/orgs/97271/customers/1").json is None
+    assert transport.request("DELETE", "/api/orgs/12345/customers/1").json is None
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1250,12 +1250,12 @@ def test_transport_refuses_to_send_when_the_budget_is_spent():
         return httpx.Response(200, json={"ok": True})
 
     transport = make_transport(handler, budget=budget)
-    transport.request("GET", "/api/orgs/97271/customers")
+    transport.request("GET", "/api/orgs/12345/customers")
 
     from minimax_api.errors import RateBudgetExceeded
 
     with pytest.raises(RateBudgetExceeded):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
     assert len(calls) == 1
 ```
 
@@ -1448,7 +1448,7 @@ def test_pagination_requests_the_large_page_size():
         seen.append(dict(request.url.params))
         return httpx.Response(200, json={"Rows": [], "TotalRows": 0, "CurrentPageNumber": 1, "PageSize": DEFAULT_PAGE_SIZE})
 
-    list(paginate(make_transport(handler), "/api/orgs/97271/customers", Row))
+    list(paginate(make_transport(handler), "/api/orgs/12345/customers", Row))
     assert seen[0]["PageSize"] == str(DEFAULT_PAGE_SIZE)
 
 
@@ -1463,7 +1463,7 @@ def test_pagination_walks_every_page():
         page = request.url.params.get("CurrentPage", "1")
         return httpx.Response(200, json=pages[page])
 
-    rows = list(paginate(make_transport(handler), "/api/orgs/97271/customers", Row, page_size=2))
+    rows = list(paginate(make_transport(handler), "/api/orgs/12345/customers", Row, page_size=2))
     assert [row.id for row in rows] == [1, 2, 3, 4, 5]
 
 
@@ -1474,7 +1474,7 @@ def test_pagination_keeps_caller_parameters():
         seen.append(dict(request.url.params))
         return httpx.Response(200, json={"Rows": [], "TotalRows": 0, "CurrentPageNumber": 1, "PageSize": 300})
 
-    list(paginate(make_transport(handler), "/api/orgs/97271/customers", Row, params={"SearchString": "acme"}))
+    list(paginate(make_transport(handler), "/api/orgs/12345/customers", Row, params={"SearchString": "acme"}))
     assert seen[0]["SearchString"] == "acme"
 
 
@@ -1487,7 +1487,7 @@ def test_pagination_stops_when_a_page_comes_back_empty():
         calls.append(request)
         return httpx.Response(200, json={"Rows": [], "TotalRows": 99, "CurrentPageNumber": 1, "PageSize": 300})
 
-    rows = list(paginate(make_transport(handler), "/api/orgs/97271/customers", Row))
+    rows = list(paginate(make_transport(handler), "/api/orgs/12345/customers", Row))
     assert rows == []
     assert len(calls) == 1
 
@@ -1496,7 +1496,7 @@ def test_pagination_handles_a_bare_list_response():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=[{"ID": 7}])
 
-    rows = list(paginate(make_transport(handler), "/api/orgs/97271/countries", Row))
+    rows = list(paginate(make_transport(handler), "/api/orgs/12345/countries", Row))
     assert [row.id for row in rows] == [7]
 ```
 
@@ -1549,7 +1549,7 @@ class SearchResult(MinimaxModel, Generic[T]):
 
 The Swagger document does not describe the paging query parameters, but the
 live API honours them: `PageSize` sets the page length and `CurrentPage`
-selects the page. Both were verified against organisation 97271 on 2026-09-21.
+selects the page. Both were verified against a live RS organisation on 2026-09-21.
 """
 
 from __future__ import annotations
@@ -2547,7 +2547,7 @@ def make_client(routes):
         return route(request) if callable(route) else route
 
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    return MinimaxClient(credentials=CREDENTIALS, organisation_id=97271, http=http)
+    return MinimaxClient(credentials=CREDENTIALS, organisation_id=12345, http=http)
 
 
 def test_currencies_are_read_from_the_organisation_not_a_global_endpoint():
@@ -2565,10 +2565,10 @@ def test_currencies_are_read_from_the_organisation_not_a_global_endpoint():
             },
         )
 
-    client = make_client({("GET", "/RS/API/api/orgs/97271/currencies"): route})
+    client = make_client({("GET", "/RS/API/api/orgs/12345/currencies"): route})
     currencies = client.codelists.currencies()
 
-    assert seen == ["/RS/API/api/orgs/97271/currencies"]
+    assert seen == ["/RS/API/api/orgs/12345/currencies"]
     assert currencies[0].code == "RSD"
     assert currencies[0].currency_id == 2
 
@@ -2585,35 +2585,35 @@ def test_currency_by_code_resolves_rather_than_assuming_an_id():
         "CurrentPageNumber": 1,
         "PageSize": 300,
     }
-    client = make_client({("GET", "/RS/API/api/orgs/97271/currencies"): httpx.Response(200, json=rows)})
+    client = make_client({("GET", "/RS/API/api/orgs/12345/currencies"): httpx.Response(200, json=rows)})
     assert client.codelists.currency_by_code("RSD").currency_id == 2
 
 
 def test_country_by_code_returns_none_when_absent():
     rows = {"Rows": [{"CountryId": 3, "Code": "RS"}], "TotalRows": 1, "CurrentPageNumber": 1, "PageSize": 300}
-    client = make_client({("GET", "/RS/API/api/orgs/97271/countries"): httpx.Response(200, json=rows)})
+    client = make_client({("GET", "/RS/API/api/orgs/12345/countries"): httpx.Response(200, json=rows)})
     assert client.codelists.country_by_code("XX") is None
 
 
 def test_creating_a_customer_returns_the_id_from_the_location_header():
-    location = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/97271/customers/4242"}
+    location = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/12345/customers/4242"}
     captured = {}
 
     def route(request: httpx.Request) -> httpx.Response:
         captured["body"] = request.content.decode()
         return httpx.Response(201, headers=location)
 
-    client = make_client({("POST", "/RS/API/api/orgs/97271/customers"): route})
+    client = make_client({("POST", "/RS/API/api/orgs/12345/customers"): route})
     from minimax_api.models import Customer
 
-    new_id = client.customers.create(Customer(name="ACME", address="Lomina 51"))
+    new_id = client.customers.create(Customer(name="ACME", address="Example Street 1"))
     assert new_id == 4242
     # Vendor spelling on the wire, snake_case in Python.
     assert '"Name": "ACME"' in captured["body"] or '"Name":"ACME"' in captured["body"]
 
 
 def test_creating_a_customer_without_a_location_header_is_an_error():
-    client = make_client({("POST", "/RS/API/api/orgs/97271/customers"): httpx.Response(201)})
+    client = make_client({("POST", "/RS/API/api/orgs/12345/customers"): httpx.Response(201)})
     from minimax_api.models import Customer
 
     with pytest.raises(ValidationError):
@@ -2627,7 +2627,7 @@ def test_updating_without_a_row_version_is_refused_before_the_request():
         calls.append(request)
         return httpx.Response(200)
 
-    client = make_client({("PUT", "/RS/API/api/orgs/97271/customers/1"): route})
+    client = make_client({("PUT", "/RS/API/api/orgs/12345/customers/1"): route})
     from minimax_api.models import Customer
 
     with pytest.raises(ValidationError):
@@ -2637,7 +2637,7 @@ def test_updating_without_a_row_version_is_refused_before_the_request():
 
 def test_a_row_version_conflict_surfaces_as_concurrency_error():
     body = {"Message": "Concurrency error - record changed by another action (RowVersion)"}
-    client = make_client({("PUT", "/RS/API/api/orgs/97271/customers/1"): httpx.Response(400, json=body)})
+    client = make_client({("PUT", "/RS/API/api/orgs/12345/customers/1"): httpx.Response(400, json=body)})
     from minimax_api.models import Customer
 
     with pytest.raises(ConcurrencyError):
@@ -2653,7 +2653,7 @@ def test_customers_list_walks_pages():
     def route(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=pages[request.url.params.get("CurrentPage", "1")])
 
-    client = make_client({("GET", "/RS/API/api/orgs/97271/customers"): route})
+    client = make_client({("GET", "/RS/API/api/orgs/12345/customers"): route})
     customers = client.customers.list(page_size=1)
     assert [c.customer_id for c in customers] == [1, 2]
 ```
@@ -2677,7 +2677,7 @@ def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
             json={
-                "Rows": [{"Organisation": {"ID": 97271, "Name": "ACME"}}],
+                "Rows": [{"Organisation": {"ID": 12345, "Name": "ACME"}}],
                 "TotalRows": 1,
                 "CurrentPageNumber": 1,
                 "PageSize": 300,
@@ -2688,14 +2688,14 @@ def handler(request: httpx.Request) -> httpx.Response:
 
 def test_organisations_lists_what_the_credentials_can_reach():
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    client = MinimaxClient(credentials=CREDENTIALS, organisation_id=97271, http=http)
+    client = MinimaxClient(credentials=CREDENTIALS, organisation_id=12345, http=http)
     organisations = client.organisations()
-    assert [org.id for org in organisations] == [97271]
+    assert [org.id for org in organisations] == [12345]
 
 
 def test_client_works_as_a_context_manager():
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    with MinimaxClient(credentials=CREDENTIALS, organisation_id=97271, http=http) as client:
+    with MinimaxClient(credentials=CREDENTIALS, organisation_id=12345, http=http) as client:
         assert client.organisations()[0].name == "ACME"
 
 
@@ -2731,7 +2731,7 @@ Expected: FAIL — `ImportError: cannot import name 'MinimaxClient' from 'minima
 
 Every ID here is organisation-specific. The vendor's published samples give
 `Country.ID` 192 for Serbia and `Currency.ID` 7 as a default; in the Serbian
-organisation 97271, Serbia is 3, RSD is 2, and 7 is the Czech koruna. That is
+a live RS organisation, Serbia is 3, RSD is 2, and 7 is the Czech koruna. That is
 why this module resolves and never assumes, and why no ID constant appears
 anywhere in this library.
 """
@@ -2934,7 +2934,7 @@ class MinimaxClient:
 
     with MinimaxClient(
         credentials=Credentials(client_id=..., client_secret=..., username=..., password=...),
-        organisation_id=97271,
+        organisation_id=12345,
     ) as client:
         rsd = client.codelists.currency_by_code("RSD")
     ```
@@ -3279,7 +3279,7 @@ with MinimaxClient(
         username="...",       # Moj profil -> Lozinke za pristup spoljnim aplikacijama
         password="...",
     ),
-    organisation_id=97271,
+    organisation_id=12345,
 ) as client:
     print([org.name for org in client.organisations()])
 
@@ -3291,7 +3291,7 @@ with MinimaxClient(
     customer_id = client.customers.create(
         Customer(
             name="ACME d.o.o.",
-            address="Lomina 51",
+            address="Example Street 1",
             postal_code="11000",
             city="Beograd",
             country={"ID": serbia.country_id},
@@ -3435,7 +3435,7 @@ writes and concurrency → Tasks 3 and 9; errors → Task 1; testing's three lev
 
 **One spec requirement is deliberately deferred:** the spec's "contract tests — recorded real
 responses, sanitised" layer. Recording them requires an organisation with real customers and
-invoices, and organisation 97271 is currently empty (`customers` and `items` both return
+invoices, and a live RS organisation is currently empty (`customers` and `items` both return
 `TotalRows` 0). Task 10's live tests cover what can be verified today. Add contract fixtures
 when the pilot organisation has data — that is a follow-up task, not a gap to paper over.
 

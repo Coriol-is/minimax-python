@@ -52,9 +52,9 @@ def test_get_builds_the_url_and_sends_the_bearer_token() -> None:
         return httpx.Response(200, json={"Rows": []})
 
     transport = make_transport(handler)
-    response = transport.request("GET", "/api/orgs/97271/customers", params={"PageSize": 300})
+    response = transport.request("GET", "/api/orgs/12345/customers", params={"PageSize": 300})
 
-    assert seen["url"] == "https://moj.minimax.rs/RS/API/api/orgs/97271/customers?PageSize=300"
+    assert seen["url"] == "https://moj.minimax.rs/RS/API/api/orgs/12345/customers?PageSize=300"
     assert seen["auth"] == "Bearer token-1"
     assert response.status_code == 200
     assert response.json == {"Rows": []}
@@ -65,21 +65,21 @@ def test_404_becomes_not_found() -> None:
         lambda request: httpx.Response(404, json={"Message": "no such thing"})
     )
     with pytest.raises(NotFoundError):
-        transport.request("GET", "/api/orgs/97271/customers/999")
+        transport.request("GET", "/api/orgs/12345/customers/999")
 
 
 def test_concurrency_message_becomes_concurrency_error() -> None:
     body = {"Message": "Concurrency error - record changed by another action (RowVersion)"}
     transport = make_transport(lambda request: httpx.Response(400, json=body))
     with pytest.raises(ConcurrencyError):
-        transport.request("PUT", "/api/orgs/97271/customers/1", json={})
+        transport.request("PUT", "/api/orgs/12345/customers/1", json={})
 
 
 def test_other_4xx_becomes_validation_error_carrying_the_server_text() -> None:
     body = {"Message": "Name is required"}
     transport = make_transport(lambda request: httpx.Response(400, json=body))
     with pytest.raises(ValidationError) as raised:
-        transport.request("POST", "/api/orgs/97271/customers", json={})
+        transport.request("POST", "/api/orgs/12345/customers", json={})
     assert raised.value.status_code == 400
     assert raised.value.payload == body
 
@@ -93,7 +93,7 @@ def test_5xx_is_retried_then_succeeds() -> None:
         return responses.pop(0)
 
     transport = make_transport(handler)
-    assert transport.request("GET", "/api/orgs/97271/customers").json == {"ok": True}
+    assert transport.request("GET", "/api/orgs/12345/customers").json == {"ok": True}
     assert len(calls) == 2
 
 
@@ -106,7 +106,7 @@ def test_5xx_gives_up_after_the_retry_budget() -> None:
 
     transport = make_transport(handler, max_transport_retries=3)
     with pytest.raises(TransportError):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
     assert len(calls) == 3
 
 
@@ -120,7 +120,7 @@ def test_401_on_an_api_call_refreshes_the_token_once() -> None:
         return httpx.Response(200, json={"ok": True})
 
     transport = make_transport(handler)
-    assert transport.request("GET", "/api/orgs/97271/customers").json == {"ok": True}
+    assert transport.request("GET", "/api/orgs/12345/customers").json == {"ok": True}
     assert calls == ["Bearer token-1", "Bearer token-2"]
 
 
@@ -133,7 +133,7 @@ def test_repeated_401_does_not_loop_forever() -> None:
 
     transport = make_transport(handler)
     with pytest.raises(TransportError):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
     assert len(calls) == 2
 
 
@@ -143,13 +143,13 @@ def test_connection_error_is_a_transport_error() -> None:
 
     transport = make_transport(handler, max_transport_retries=2)
     with pytest.raises(TransportError):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
 
 
 def test_location_header_yields_the_created_id() -> None:
-    headers = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/97271/customers/4242"}
+    headers = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/12345/customers/4242"}
     transport = make_transport(lambda request: httpx.Response(201, headers=headers))
-    response = transport.request("POST", "/api/orgs/97271/customers", json={})
+    response = transport.request("POST", "/api/orgs/12345/customers", json={})
     assert response.location_id == 4242
 
 
@@ -164,7 +164,7 @@ def test_unparseable_location_yields_none() -> None:
 
 def test_empty_body_parses_as_none() -> None:
     transport = make_transport(lambda request: httpx.Response(204))
-    assert transport.request("DELETE", "/api/orgs/97271/customers/1").json is None
+    assert transport.request("DELETE", "/api/orgs/12345/customers/1").json is None
 
 
 def test_401_refresh_does_not_consume_transport_retry_budget() -> None:
@@ -178,7 +178,7 @@ def test_401_refresh_does_not_consume_transport_retry_budget() -> None:
         return httpx.Response(200, json={"ok": True})
 
     transport = make_transport(handler, max_transport_retries=1)
-    assert transport.request("GET", "/api/orgs/97271/customers").json == {"ok": True}
+    assert transport.request("GET", "/api/orgs/12345/customers").json == {"ok": True}
     assert len(calls) == 2
     assert calls == ["Bearer token-1", "Bearer token-2"]
 
@@ -198,24 +198,24 @@ def test_401_refresh_does_not_add_extra_transport_attempts() -> None:
 
     transport = make_transport(handler, max_transport_retries=2)
     with pytest.raises(TransportError):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
     assert len(calls) == 3
 
 
 def test_location_id_from_trailing_slash_url() -> None:
-    headers = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/97271/customers/4242/"}
+    headers = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/12345/customers/4242/"}
     response = Response(status_code=201, json=None, headers=headers)
     assert response.location_id == 4242
 
 
 def test_location_id_from_query_string_url() -> None:
-    headers = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/97271/customers/4242?foo=bar"}
+    headers = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/12345/customers/4242?foo=bar"}
     response = Response(status_code=201, json=None, headers=headers)
     assert response.location_id == 4242
 
 
 def test_location_id_from_relative_path() -> None:
-    headers = {"Location": "/RS/API/api/orgs/97271/customers/4242"}
+    headers = {"Location": "/RS/API/api/orgs/12345/customers/4242"}
     response = Response(status_code=201, json=None, headers=headers)
     assert response.location_id == 4242
 
@@ -244,10 +244,10 @@ def test_transport_refuses_to_send_when_the_budget_is_spent() -> None:
         return httpx.Response(200, json={"ok": True})
 
     transport = make_transport(handler, budget=budget)
-    transport.request("GET", "/api/orgs/97271/customers")
+    transport.request("GET", "/api/orgs/12345/customers")
 
     with pytest.raises(RateBudgetExceeded):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
     assert len(calls) == 1
 
 
@@ -263,7 +263,7 @@ def test_post_with_a_connection_error_is_not_retried_and_raises_ambiguous_write(
 
     transport = make_transport(handler, max_transport_retries=3)
     with pytest.raises(AmbiguousWriteError) as raised:
-        transport.request("POST", "/api/orgs/97271/issuedinvoices", json={"Name": "x"})
+        transport.request("POST", "/api/orgs/12345/issuedinvoices", json={"Name": "x"})
 
     assert len(calls) == 1  # never resent
     assert raised.value.retryable is False
@@ -278,7 +278,7 @@ def test_post_with_a_502_is_not_retried_and_raises_ambiguous_write() -> None:
 
     transport = make_transport(handler, max_transport_retries=3)
     with pytest.raises(AmbiguousWriteError):
-        transport.request("POST", "/api/orgs/97271/issuedinvoices", json={})
+        transport.request("POST", "/api/orgs/12345/issuedinvoices", json={})
 
     assert len(calls) == 1  # never resent
 
@@ -292,7 +292,7 @@ def test_get_with_a_502_still_retries() -> None:
         return responses.pop(0)
 
     transport = make_transport(handler)
-    assert transport.request("GET", "/api/orgs/97271/customers").json == {"ok": True}
+    assert transport.request("GET", "/api/orgs/12345/customers").json == {"ok": True}
     assert len(calls) == 2
 
 
@@ -333,13 +333,13 @@ def test_429_with_an_http_date_retry_after_does_not_crash_and_penalizes_budget()
         budget=budget,
     )
     with pytest.raises(RateBudgetExceeded) as raised:
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
     assert raised.value.retry_after >= 0
 
     # The penalty was actually applied to the budget: a second call is
     # refused locally, with no second network request required.
     with pytest.raises(RateBudgetExceeded):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
 
 
 def test_429_drives_the_budget_penalty_through_transport() -> None:
@@ -357,13 +357,13 @@ def test_429_drives_the_budget_penalty_through_transport() -> None:
 
     transport = make_transport(handler, budget=budget)
     with pytest.raises(RateBudgetExceeded) as raised:
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
     assert raised.value.retry_after == pytest.approx(60.0)
     assert len(calls) == 1
 
     now[0] += 30
     with pytest.raises(RateBudgetExceeded):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
     assert len(calls) == 1  # still refused locally, no second request
 
 
@@ -374,14 +374,14 @@ def test_concurrency_match_covers_rowversion_wording() -> None:
     body = {"Message": "RowVersion mismatch: the record has been modified"}
     transport = make_transport(lambda request: httpx.Response(400, json=body))
     with pytest.raises(ConcurrencyError):
-        transport.request("PUT", "/api/orgs/97271/customers/1", json={})
+        transport.request("PUT", "/api/orgs/12345/customers/1", json={})
 
 
 def test_concurrency_match_covers_row_version_with_a_space() -> None:
     body = {"Message": "Row version conflict: please reload and try again"}
     transport = make_transport(lambda request: httpx.Response(400, json=body))
     with pytest.raises(ConcurrencyError):
-        transport.request("PUT", "/api/orgs/97271/customers/1", json={})
+        transport.request("PUT", "/api/orgs/12345/customers/1", json={})
 
 
 # -- Budget undercounts retries: connect vs. read/timeout errors ------------
@@ -414,7 +414,7 @@ def test_a_connect_error_never_reached_the_server_and_is_not_counted() -> None:
 
     transport = make_transport(handler, budget=budget, max_transport_retries=2)
     with pytest.raises(TransportError):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
 
     assert store.timestamps == []
 
@@ -430,7 +430,7 @@ def test_a_read_timeout_may_have_reached_the_server_and_is_counted() -> None:
 
     transport = make_transport(handler, budget=budget, max_transport_retries=2)
     with pytest.raises(TransportError):
-        transport.request("GET", "/api/orgs/97271/customers")
+        transport.request("GET", "/api/orgs/12345/customers")
 
     # Each of the two exhausted attempts may have reached Minimax.
     assert len(store.timestamps) == 2

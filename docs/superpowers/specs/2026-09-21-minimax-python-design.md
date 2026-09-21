@@ -41,7 +41,7 @@ supported, because we have credentials for exactly one organisation and cannot t
 
 ## Verified facts this design rests on
 
-Established against the live API on 2026-09-21 with organisation `97271`:
+Established against the live API on 2026-09-21 with a live RS organisation:
 
 | Fact | Value |
 |---|---|

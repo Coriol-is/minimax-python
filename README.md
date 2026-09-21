@@ -28,7 +28,7 @@ with MinimaxClient(
         username="...",       # Moj profil -> Lozinke za pristup spoljnim aplikacijama
         password="...",
     ),
-    organisation_id=97271,
+    organisation_id=12345,
 ) as client:
     print([org.name for org in client.organisations()])
 
@@ -40,7 +40,7 @@ with MinimaxClient(
     customer_id = client.customers.create(
         Customer(
             name="ACME d.o.o.",
-            address="Lomina 51",
+            address="Example Street 1",
             postal_code="11000",
             city="Beograd",
             country=FkField(id=serbia.country_id),

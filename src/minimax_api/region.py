@@ -21,7 +21,7 @@ class Region:
     scope: str
 
 
-#: Serbia. Verified against organisation 97271 on 2026-09-21.
+#: Serbia. Verified against a live RS organisation on 2026-09-21.
 RS = Region(
     code="RS",
     base_url="https://moj.minimax.rs/RS/API",

@@ -27,7 +27,7 @@ class MinimaxClient:
 
     with MinimaxClient(
         credentials=Credentials(client_id=..., client_secret=..., username=..., password=...),
-        organisation_id=97271,
+        organisation_id=12345,
     ) as client:
         rsd = client.codelists.currency_by_code("RSD")
     ```

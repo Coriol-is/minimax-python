@@ -63,7 +63,7 @@ def test_pagination_requests_the_large_page_size() -> None:
             },
         )
 
-    list(paginate(make_transport(handler), "/api/orgs/97271/customers", Row))
+    list(paginate(make_transport(handler), "/api/orgs/12345/customers", Row))
     assert seen[0]["PageSize"] == str(DEFAULT_PAGE_SIZE)
 
 
@@ -93,7 +93,7 @@ def test_pagination_walks_every_page() -> None:
         page = request.url.params.get("CurrentPage", "1")
         return httpx.Response(200, json=pages[page])
 
-    rows = list(paginate(make_transport(handler), "/api/orgs/97271/customers", Row, page_size=2))
+    rows = list(paginate(make_transport(handler), "/api/orgs/12345/customers", Row, page_size=2))
     assert [row.id for row in rows] == [1, 2, 3, 4, 5]
 
 
@@ -115,7 +115,7 @@ def test_pagination_keeps_caller_parameters() -> None:
     list(
         paginate(
             make_transport(handler),
-            "/api/orgs/97271/customers",
+            "/api/orgs/12345/customers",
             Row,
             params={"SearchString": "acme"},
         )
@@ -140,7 +140,7 @@ def test_pagination_stops_when_a_page_comes_back_empty() -> None:
             },
         )
 
-    rows = list(paginate(make_transport(handler), "/api/orgs/97271/customers", Row))
+    rows = list(paginate(make_transport(handler), "/api/orgs/12345/customers", Row))
     assert rows == []
     assert len(calls) == 1
 
@@ -160,7 +160,7 @@ def test_pagination_keeps_going_when_total_rows_is_missing() -> None:
         page = request.url.params.get("CurrentPage", "1")
         return httpx.Response(200, json=pages[page])
 
-    rows = list(paginate(make_transport(handler), "/api/orgs/97271/customers", Row, page_size=2))
+    rows = list(paginate(make_transport(handler), "/api/orgs/12345/customers", Row, page_size=2))
     assert [row.id for row in rows] == [1, 2, 3]
 
 
@@ -168,5 +168,5 @@ def test_pagination_handles_a_bare_list_response() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=[{"ID": 7}])
 
-    rows = list(paginate(make_transport(handler), "/api/orgs/97271/countries", Row))
+    rows = list(paginate(make_transport(handler), "/api/orgs/12345/countries", Row))
     assert [row.id for row in rows] == [7]

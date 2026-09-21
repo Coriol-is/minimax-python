@@ -18,7 +18,7 @@ def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
             json={
-                "Rows": [{"Organisation": {"ID": 97271, "Name": "ACME"}}],
+                "Rows": [{"Organisation": {"ID": 12345, "Name": "ACME"}}],
                 "TotalRows": 1,
                 "CurrentPageNumber": 1,
                 "PageSize": 300,
@@ -36,14 +36,14 @@ def make_client_with_orgs_response(orgs_response: httpx.Response) -> MinimaxClie
         raise AssertionError(f"unexpected request: {request.url}")
 
     http = httpx.Client(transport=httpx.MockTransport(route))
-    return MinimaxClient(credentials=CREDENTIALS, organisation_id=97271, http=http)
+    return MinimaxClient(credentials=CREDENTIALS, organisation_id=12345, http=http)
 
 
 def test_organisations_lists_what_the_credentials_can_reach() -> None:
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    client = MinimaxClient(credentials=CREDENTIALS, organisation_id=97271, http=http)
+    client = MinimaxClient(credentials=CREDENTIALS, organisation_id=12345, http=http)
     organisations = client.organisations()
-    assert [org.id for org in organisations] == [97271]
+    assert [org.id for org in organisations] == [12345]
 
 
 def test_organisations_skips_a_row_whose_nested_organisation_is_null() -> None:
@@ -63,19 +63,19 @@ def test_organisations_skips_a_row_whose_nested_organisation_is_null() -> None:
 def test_organisations_accepts_a_bare_reference_row() -> None:
     # No "Organisation" wrapper at all, just the reference object itself.
     rows = {
-        "Rows": [{"ID": 97271, "Name": "ACME"}],
+        "Rows": [{"ID": 12345, "Name": "ACME"}],
         "TotalRows": 1,
         "CurrentPageNumber": 1,
         "PageSize": 300,
     }
     client = make_client_with_orgs_response(httpx.Response(200, json=rows))
     organisations = client.organisations()
-    assert [org.id for org in organisations] == [97271]
+    assert [org.id for org in organisations] == [12345]
 
 
 def test_client_works_as_a_context_manager() -> None:
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    with MinimaxClient(credentials=CREDENTIALS, organisation_id=97271, http=http) as client:
+    with MinimaxClient(credentials=CREDENTIALS, organisation_id=12345, http=http) as client:
         assert client.organisations()[0].name == "ACME"
 
 
@@ -83,7 +83,7 @@ def test_close_does_not_close_an_injected_http_client() -> None:
     # An injected client is owned by its caller; MinimaxClient must not close
     # something it did not create, or it would break other users of that client.
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    client = MinimaxClient(credentials=CREDENTIALS, organisation_id=97271, http=http)
+    client = MinimaxClient(credentials=CREDENTIALS, organisation_id=12345, http=http)
     client.close()
     assert not http.is_closed
     http.close()
@@ -93,7 +93,7 @@ def test_context_manager_closes_an_owned_client_even_when_the_body_raises() -> N
     # No `http=` is passed, so the client constructs and owns its own httpx.Client.
     # `_http` is an implementation detail inspected here only to confirm cleanup.
     with pytest.raises(RuntimeError):
-        with MinimaxClient(credentials=CREDENTIALS, organisation_id=97271) as client:
+        with MinimaxClient(credentials=CREDENTIALS, organisation_id=12345) as client:
             owned_http = client._http
             raise RuntimeError("boom")
     assert owned_http.is_closed

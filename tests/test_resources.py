@@ -27,7 +27,7 @@ def make_client(routes: dict[tuple[str, str], Route]) -> MinimaxClient:
         return route(request) if callable(route) else route
 
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    return MinimaxClient(credentials=CREDENTIALS, organisation_id=97271, http=http)
+    return MinimaxClient(credentials=CREDENTIALS, organisation_id=12345, http=http)
 
 
 def test_currencies_are_read_from_the_organisation_not_a_global_endpoint() -> None:
@@ -45,10 +45,10 @@ def test_currencies_are_read_from_the_organisation_not_a_global_endpoint() -> No
             },
         )
 
-    client = make_client({("GET", "/RS/API/api/orgs/97271/currencies"): route})
+    client = make_client({("GET", "/RS/API/api/orgs/12345/currencies"): route})
     currencies = client.codelists.currencies()
 
-    assert seen == ["/RS/API/api/orgs/97271/currencies"]
+    assert seen == ["/RS/API/api/orgs/12345/currencies"]
     assert currencies[0].code == "RSD"
     assert currencies[0].currency_id == 2
 
@@ -66,7 +66,7 @@ def test_currency_by_code_resolves_rather_than_assuming_an_id() -> None:
         "PageSize": 300,
     }
     response = httpx.Response(200, json=rows)
-    client = make_client({("GET", "/RS/API/api/orgs/97271/currencies"): response})
+    client = make_client({("GET", "/RS/API/api/orgs/12345/currencies"): response})
     currency = client.codelists.currency_by_code("RSD")
     assert currency is not None
     assert currency.currency_id == 2
@@ -80,22 +80,22 @@ def test_country_by_code_returns_none_when_absent() -> None:
         "PageSize": 300,
     }
     response = httpx.Response(200, json=rows)
-    client = make_client({("GET", "/RS/API/api/orgs/97271/countries"): response})
+    client = make_client({("GET", "/RS/API/api/orgs/12345/countries"): response})
     assert client.codelists.country_by_code("XX") is None
 
 
 def test_creating_a_customer_returns_the_id_from_the_location_header() -> None:
-    location = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/97271/customers/4242"}
+    location = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/12345/customers/4242"}
     captured: dict[str, str] = {}
 
     def route(request: httpx.Request) -> httpx.Response:
         captured["body"] = request.content.decode()
         return httpx.Response(201, headers=location)
 
-    client = make_client({("POST", "/RS/API/api/orgs/97271/customers"): route})
+    client = make_client({("POST", "/RS/API/api/orgs/12345/customers"): route})
     from minimax_api.models import Customer
 
-    new_id = client.customers.create(Customer(name="ACME", address="Lomina 51"))
+    new_id = client.customers.create(Customer(name="ACME", address="Example Street 1"))
     assert new_id == 4242
     # Vendor spelling on the wire, snake_case in Python.
     assert '"Name": "ACME"' in captured["body"] or '"Name":"ACME"' in captured["body"]
@@ -105,7 +105,7 @@ def test_creating_a_customer_with_no_location_header_is_ambiguous_not_invalid() 
     # The write succeeded -- Minimax just didn't say what the new ID is. That
     # must not be reported as ValidationError: a caller who sees that type and
     # "fixes the payload" would resubmit an identical customer, duplicating it.
-    client = make_client({("POST", "/RS/API/api/orgs/97271/customers"): httpx.Response(201)})
+    client = make_client({("POST", "/RS/API/api/orgs/12345/customers"): httpx.Response(201)})
     from minimax_api.models import Customer
 
     with pytest.raises(AmbiguousWriteError):
@@ -114,7 +114,7 @@ def test_creating_a_customer_with_no_location_header_is_ambiguous_not_invalid() 
 
 def test_creating_an_issued_invoice_without_a_location_header_is_ambiguous() -> None:
     client = make_client(
-        {("POST", "/RS/API/api/orgs/97271/issuedinvoices"): httpx.Response(201)}
+        {("POST", "/RS/API/api/orgs/12345/issuedinvoices"): httpx.Response(201)}
     )
     from minimax_api.models import IssuedInvoice
 
@@ -129,7 +129,7 @@ def test_updating_without_a_row_version_is_refused_before_the_request() -> None:
         calls.append(request)
         return httpx.Response(200)
 
-    client = make_client({("PUT", "/RS/API/api/orgs/97271/customers/1"): route})
+    client = make_client({("PUT", "/RS/API/api/orgs/12345/customers/1"): route})
     from minimax_api.models import Customer
 
     with pytest.raises(ValidationError):
@@ -140,7 +140,7 @@ def test_updating_without_a_row_version_is_refused_before_the_request() -> None:
 def test_a_row_version_conflict_surfaces_as_concurrency_error() -> None:
     body = {"Message": "Concurrency error - record changed by another action (RowVersion)"}
     response = httpx.Response(400, json=body)
-    client = make_client({("PUT", "/RS/API/api/orgs/97271/customers/1"): response})
+    client = make_client({("PUT", "/RS/API/api/orgs/12345/customers/1"): response})
     from minimax_api.models import Customer
 
     with pytest.raises(ConcurrencyError):
@@ -156,6 +156,6 @@ def test_customers_list_walks_pages() -> None:
     def route(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=pages[request.url.params.get("CurrentPage", "1")])
 
-    client = make_client({("GET", "/RS/API/api/orgs/97271/customers"): route})
+    client = make_client({("GET", "/RS/API/api/orgs/12345/customers"): route})
     customers = client.customers.list(page_size=1)
     assert [c.customer_id for c in customers] == [1, 2]

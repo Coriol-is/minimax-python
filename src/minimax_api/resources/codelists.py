@@ -2,7 +2,7 @@
 
 Every ID here is organisation-specific. The vendor's published samples give
 `Country.ID` 192 for Serbia and `Currency.ID` 7 as a default; in the Serbian
-organisation 97271, Serbia is 3, RSD is 2, and 7 is the Czech koruna. That is
+a live RS organisation, Serbia is 3, RSD is 2, and 7 is the Czech koruna. That is
 why this module resolves and never assumes, and why no ID constant appears
 anywhere in this library.
 """

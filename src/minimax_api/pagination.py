@@ -2,7 +2,7 @@
 
 The Swagger document does not describe the paging query parameters, but the
 live API honours them: `PageSize` sets the page length and `CurrentPage`
-selects the page. Both were verified against organisation 97271 on 2026-09-21.
+selects the page. Both were verified against a live RS organisation on 2026-09-21.
 """
 
 from __future__ import annotations

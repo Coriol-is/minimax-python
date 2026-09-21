@@ -49,7 +49,7 @@ def test_four_threads_one_bad_password_send_exactly_one_token_request() -> None:
         raise AssertionError("must never reach the API with no valid token")
 
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    client = MinimaxClient(credentials=BAD_CREDENTIALS, organisation_id=97271, http=http)
+    client = MinimaxClient(credentials=BAD_CREDENTIALS, organisation_id=12345, http=http)
 
     def worker() -> None:
         barrier.wait()
@@ -89,7 +89,7 @@ def test_four_threads_one_good_password_share_one_token_and_all_succeed() -> Non
         return httpx.Response(200, json=countries_payload)
 
     http = httpx.Client(transport=httpx.MockTransport(handler))
-    client = MinimaxClient(credentials=GOOD_CREDENTIALS, organisation_id=97271, http=http)
+    client = MinimaxClient(credentials=GOOD_CREDENTIALS, organisation_id=12345, http=http)
 
     results: list[list[Country]] = []
     results_lock = threading.Lock()
