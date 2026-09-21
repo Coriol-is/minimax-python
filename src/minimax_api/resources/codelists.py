@@ -39,9 +39,21 @@ class CodeLists:
         return list(paginate(self._transport, self._base("accounts"), Account, page_size=page_size))
 
     def country_by_code(self, code: str) -> Country | None:
-        """Find a country by its ISO code, e.g. `RS`. Returns None if absent."""
+        """Find a country by its ISO code, e.g. `RS`. Returns None if absent.
+
+        Each call fetches the whole country list, costing one request against
+        the organisation's daily budget. A caller resolving many records should
+        call `countries()` once and look the code up locally, rather than
+        calling this per record.
+        """
         return next((row for row in self.countries() if row.code == code), None)
 
     def currency_by_code(self, code: str) -> Currency | None:
-        """Find a currency by its ISO code, e.g. `RSD`. Returns None if absent."""
+        """Find a currency by its ISO code, e.g. `RSD`. Returns None if absent.
+
+        Each call fetches the whole currency list, costing one request against
+        the organisation's daily budget. A caller resolving many records should
+        call `currencies()` once and look the code up locally, rather than
+        calling this per record.
+        """
         return next((row for row in self.currencies() if row.code == code), None)

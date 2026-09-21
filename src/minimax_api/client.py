@@ -69,12 +69,24 @@ class MinimaxClient:
         Worth calling first on any new deployment: an organisation in this list
         that you did not expect means the API right was granted more broadly
         than intended.
+
+        Each row is either `{"Organisation": {...}, "APIAccess": "D"}` or a bare
+        reference object, depending on the endpoint's mood. A row that offers
+        neither a usable nested object nor an ID of its own is skipped rather
+        than turned into a placeholder: a phantom `FkField(id=None, name=None)`
+        would be indistinguishable from a real organisation to a caller checking
+        "did credentials reach exactly the organisations I expect", which is the
+        entire reason to call this method.
         """
         rows = paginate(self.transport, "/api/currentuser/orgs", FkField)
-        result = []
+        result: list[FkField] = []
         for row in rows:
             nested = row.model_extra.get("Organisation") if row.model_extra else None
-            result.append(FkField.model_validate(nested) if isinstance(nested, dict) else row)
+            if isinstance(nested, dict):
+                result.append(FkField.model_validate(nested))
+            elif row.id is not None:
+                result.append(row)
+            # else: neither a usable nested object nor an ID on the row itself.
         return result
 
     def close(self) -> None:

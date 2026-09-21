@@ -56,3 +56,14 @@ mypy_path = ["scripts"]
 # Generated code is checked, but its dynamic construction defeats some inference.
 module = "minimax_api._generated.*"
 disallow_any_explicit = false
+
+[tool.pydantic-mypy]
+# Without these, the plugin sees `MinimaxModel`'s `extra="allow"` and synthesizes
+# a permissive `__init__(self, **data: Any)` for every model, which silently
+# stops checking constructor argument types altogether. `init_typed` restores
+# per-field typing on the synthesized `__init__`; `init_forbid_extra` stops
+# `extra="allow"` (a *runtime* parsing behaviour) from also disabling
+# *construction-time* keyword checking.
+init_typed = true
+init_forbid_extra = true
+warn_required_dynamic_aliases = true
