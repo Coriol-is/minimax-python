@@ -445,3 +445,62 @@ def test_a_read_timeout_may_have_reached_the_server_and_is_counted() -> None:
 
     # Each of the two exhausted attempts may have reached Minimax.
     assert len(store.timestamps) == 2
+
+
+# -- Error bodies that are not JSON ----------------------------------------
+
+
+def test_a_html_error_body_still_produces_a_typed_error() -> None:
+    # A sibling integration against the live API reported Minimax refusal text
+    # arriving as HTML rather than JSON. It must not escape as a decode error.
+    html = "<html><body><h2>The request is invalid.</h2></body></html>"
+    transport = make_transport(lambda request: httpx.Response(400, text=html))
+
+    with pytest.raises(ValidationError) as raised:
+        transport.request("PUT", "/api/orgs/12345/customers/1", json={})
+
+    assert raised.value.status_code == 400
+    assert raised.value.payload == html
+
+
+def test_a_4xx_with_no_body_at_all_still_produces_a_typed_error() -> None:
+    # The same source reported refusals that carry no reason whatsoever.
+    transport = make_transport(lambda request: httpx.Response(400))
+
+    with pytest.raises(ValidationError) as raised:
+        transport.request("PUT", "/api/orgs/12345/customers/1", json={})
+
+    assert raised.value.payload is None
+
+
+def test_a_401_resends_a_post_exactly_once() -> None:
+    # The single deliberate exception to "a POST is never re-sent": a 401 is a
+    # definitive refusal, so nothing was written and a resend cannot duplicate
+    # a document. It must happen at most once.
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.headers["Authorization"])
+        if len(calls) == 1:
+            return httpx.Response(401, text="expired")
+        return httpx.Response(201, headers={"Location": "/api/orgs/12345/customers/5"})
+
+    transport = make_transport(handler)
+    response = transport.request("POST", "/api/orgs/12345/customers", json={"Name": "ACME"})
+
+    assert response.location_id == 5
+    assert calls == ["Bearer token-1", "Bearer token-2"]
+
+
+def test_a_repeated_401_on_a_post_does_not_resend_again() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(401, text="expired")
+
+    transport = make_transport(handler)
+    with pytest.raises(TransportError):
+        transport.request("POST", "/api/orgs/12345/customers", json={})
+
+    assert len(calls) == 2

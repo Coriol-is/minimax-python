@@ -1,0 +1,33 @@
+name: spec-drift
+
+# Minimax can change its API without telling anyone. This job asks the vendor's
+# own Swagger endpoint whether the surface still matches the document committed
+# in spec/, and fails when it does not — so drift arrives as a red check rather
+# than as a production incident weeks later.
+#
+# It needs no credentials: the Swagger document is public.
+
+on:
+  schedule:
+    # Mondays, 06:17 UTC. The odd minute keeps it off the crowded hour boundary.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: vendor API surface unchanged
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - name: Compare the live API surface against spec/
+        # --check exits 1 and prints a unified diff when the surface moved.
+        # certifi is supplied because moj.minimax.rs serves a chain some Python
+        # builds cannot verify against their default trust store.
+        run: uv run --with certifi python scripts/refresh_spec.py --check

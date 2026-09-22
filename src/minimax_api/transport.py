@@ -195,6 +195,13 @@ class Transport:
                     # rejection: the token endpoint is the only place that judges
                     # credentials, and it has its own terminal handling.
                     # This path does NOT consume a transport attempt.
+                    #
+                    # It is also the ONE place a non-idempotent request is sent
+                    # twice, and deliberately so: a 401 is a definitive refusal
+                    # from the server, not an unknown outcome -- the request was
+                    # received and rejected, so nothing was written and a resend
+                    # cannot duplicate a document. Bounded to a single retry;
+                    # a second 401 raises below.
                     refreshed = True
                     self._auth.invalidate()
                     continue

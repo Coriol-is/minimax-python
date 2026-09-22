@@ -198,3 +198,42 @@ def test_credential_rejection_error_message_hides_credentials() -> None:
     assert "password" not in error_message.lower()
     assert "secret" not in error_message.lower()
     assert "invalid_grant" not in error_message
+
+
+def test_a_200_without_an_access_token_is_a_transport_error() -> None:
+    # Not a credential rejection: nothing was judged, so this must not latch.
+    auth = make_auth(lambda request: httpx.Response(200, json={"token_type": "bearer"}))
+
+    with pytest.raises(TransportError):
+        auth.access_token()
+
+
+def test_invalidate_forces_exactly_one_refresh_under_concurrency() -> None:
+    # invalidate() takes the same lock as acquisition, so threads that call it
+    # around a refresh cannot wipe a token another thread just stored.
+    import threading
+
+    calls: list[httpx.Request] = []
+    lock = threading.Lock()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        with lock:
+            calls.append(request)
+            issued = len(calls)
+        return httpx.Response(200, json={"access_token": f"token-{issued}", "expires_in": 3600})
+
+    auth = make_auth(handler)
+    auth.access_token()
+    auth.invalidate()
+
+    tokens: list[str] = []
+    threads = [
+        threading.Thread(target=lambda: tokens.append(auth.access_token())) for _ in range(4)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(set(tokens)) == 1
+    assert len(calls) == 2

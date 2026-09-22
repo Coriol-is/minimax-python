@@ -1,0 +1,56 @@
+name: release
+
+# Builds the distributions for a pushed tag and attaches them to a GitHub
+# Release, so the package is installable straight from the tag:
+#
+#   pip install https://github.com/Coriol-is/minimax-python/releases/download/v0.1.0/minimax_api-0.1.0-py3-none-any.whl
+#
+# This deliberately does NOT publish to PyPI. Publishing is a separate decision
+# with separate obligations; when it is taken, add a job using PyPI Trusted
+# Publishing (id-token: write) rather than an API token in a secret.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      # Only to create the Release and upload its assets.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+
+      # A tag must not produce artifacts the test suite has never seen.
+      - run: uv sync --all-groups
+      - run: uv run ruff check .
+      - run: uv run mypy src tests
+      - run: uv run python scripts/generate.py --check
+      - run: uv run pytest -q
+
+      - name: Build
+        run: uv build
+      - name: Validate package metadata
+        run: uv run --no-project --with "twine>=6.1" twine check dist/*
+
+      - name: The tag must match the version in pyproject.toml
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(uv run python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          if [ "$tag" != "$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match project version $version" >&2
+            exit 1
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
