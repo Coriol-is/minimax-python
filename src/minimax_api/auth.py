@@ -137,8 +137,14 @@ class Authenticator:
             return token.access_token
 
     def invalidate(self) -> None:
-        """Drop the cached token, e.g. after an API call answered 401."""
-        self._store.set(Token(access_token="", expires_at=float("-inf")))
+        """Drop the cached token, e.g. after an API call answered 401.
+
+        Taken under the same lock as acquisition: without it, a thread handling
+        a 401 can wipe a token another thread stored microseconds earlier, and
+        the next caller pays for a token request nobody needed.
+        """
+        with self._lock:
+            self._store.set(Token(access_token="", expires_at=float("-inf")))
 
     def _request_token(self) -> Token:
         form = {

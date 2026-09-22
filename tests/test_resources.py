@@ -159,3 +159,109 @@ def test_customers_list_walks_pages() -> None:
     client = make_client({("GET", "/RS/API/api/orgs/12345/customers"): route})
     customers = client.customers.list(page_size=1)
     assert [c.customer_id for c in customers] == [1, 2]
+
+
+# -- Read paths the earlier tests never exercised ---------------------------
+
+
+def _envelope(rows: list[dict[str, object]]) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "Rows": rows,
+            "TotalRows": len(rows),
+            "CurrentPageNumber": 1,
+            "PageSize": 300,
+        },
+    )
+
+
+def test_vat_rates_keep_the_two_id_spaces_apart() -> None:
+    # VatRateId and VatRatePercentage.ID are different numbers for the same
+    # rate. Reading the wrong one silently applies a different VAT rate, so the
+    # facade must not conflate them.
+    rows = [
+        {"VatRateId": 4, "Code": "S", "Percent": 20.0, "VatRatePercentage": {"ID": 6}},
+        {"VatRateId": 3, "Code": "P", "Percent": 8.0, "VatRatePercentage": {"ID": 7}},
+    ]
+    client = make_client({("GET", "/RS/API/api/orgs/12345/vatrates"): _envelope(rows)})
+
+    rates = {rate.code: rate for rate in client.codelists.vat_rates()}
+
+    assert rates["S"].percent == 20.0
+    assert rates["S"].vat_rate_id == 4
+    assert rates["S"].vat_rate_percentage is not None
+    assert rates["S"].vat_rate_percentage.id == 6
+
+
+def test_accounts_are_read_from_the_organisation() -> None:
+    rows = [{"AccountId": 1, "Code": "2040", "Name": "Kupci u zemlji"}]
+    client = make_client({("GET", "/RS/API/api/orgs/12345/accounts"): _envelope(rows)})
+
+    accounts = client.codelists.accounts()
+
+    assert [account.code for account in accounts] == ["2040"]
+
+
+def test_getting_one_customer_reads_it_by_id() -> None:
+    seen: list[str] = []
+
+    def route(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json={"CustomerId": 7, "Name": "ACME", "RowVersion": "AAA="})
+
+    client = make_client({("GET", "/RS/API/api/orgs/12345/customers/7"): route})
+
+    customer = client.customers.get(7)
+
+    assert seen == ["/RS/API/api/orgs/12345/customers/7"]
+    assert customer.customer_id == 7
+    # The RowVersion must survive the read: an update without it is refused.
+    assert customer.row_version == "AAA="
+
+
+def test_issued_invoices_list_and_get() -> None:
+    rows = [{"IssuedInvoiceId": 11, "Status": "O"}]
+    client = make_client(
+        {
+            ("GET", "/RS/API/api/orgs/12345/issuedinvoices"): _envelope(rows),
+            ("GET", "/RS/API/api/orgs/12345/issuedinvoices/11"): httpx.Response(
+                200, json={"IssuedInvoiceId": 11, "Status": "O"}
+            ),
+        }
+    )
+
+    listed = client.issued_invoices.list()
+    one = client.issued_invoices.get(11)
+
+    assert [invoice.issued_invoice_id for invoice in listed] == [11]
+    # Documents created through the API arrive as drafts ("O"): an accepted
+    # write is not yet a business event.
+    assert one.status == "O"
+
+
+def test_creating_an_invoice_returns_the_id_from_the_location_header() -> None:
+    location = {"Location": "https://moj.minimax.rs/RS/API/api/orgs/12345/issuedinvoices/909"}
+    client = make_client(
+        {("POST", "/RS/API/api/orgs/12345/issuedinvoices"): httpx.Response(201, headers=location)}
+    )
+
+    from minimax_api.models import IssuedInvoice
+
+    assert client.issued_invoices.create(IssuedInvoice(date_issued=None)) == 909
+
+
+def test_updating_a_customer_without_an_id_is_refused_before_the_request() -> None:
+    calls: list[httpx.Request] = []
+
+    def route(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200)
+
+    client = make_client({("PUT", "/RS/API/api/orgs/12345/customers/1"): route})
+    from minimax_api.models import Customer
+
+    with pytest.raises(ValidationError):
+        client.customers.update(Customer(name="ACME", row_version="AAA="))
+
+    assert calls == []

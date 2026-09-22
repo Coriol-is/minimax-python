@@ -11,9 +11,13 @@ change, but they are untested here.
 
 ## Install
 
+Not on PyPI yet — install from the repository:
+
 ```bash
-pip install minimax-api
+pip install git+https://github.com/Coriol-is/minimax-python@v0.1.0
 ```
+
+or take the wheel attached to a [release](https://github.com/Coriol-is/minimax-python/releases).
 
 ## Use
 
@@ -131,6 +135,12 @@ uv run python scripts/generate.py               # regenerate after a spec refres
 `src/minimax_api/_generated/` is machine-written. Change `scripts/generate.py` and regenerate;
 never edit it by hand. Regeneration belongs in its own commit, so that its diff reads as a report
 on what Minimax changed.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, and
+[SECURITY.md](SECURITY.md) for how credentials are handled and what to report privately.
+
+A weekly CI job asks the vendor's public Swagger endpoint whether the API surface still matches
+the document in `spec/`, so drift arrives as a failed build rather than as a production surprise.
 
 ## Versioning
 
