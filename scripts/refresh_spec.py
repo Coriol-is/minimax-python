@@ -16,12 +16,20 @@ import argparse
 import datetime as dt
 import difflib
 import json
+import re
 import sys
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 SPEC_URL = "https://moj.minimax.rs/RS/API/swagger/docs/v1"
 SPEC_DIR = Path(__file__).resolve().parent.parent / "spec"
+
+# Free-text fields the generator never reads. Minimax re-indents the HTML in
+# them now and then; that is not API drift, so whitespace in them is collapsed
+# and dropped between tags before comparing. Rewording still shows up.
+PROSE_FIELDS = frozenset({"description", "summary", "title"})
+_BETWEEN_TAGS = re.compile(r">\s+<")
 
 
 def newest_spec() -> Path:
@@ -31,7 +39,7 @@ def newest_spec() -> Path:
     return candidates[-1]
 
 
-def fetch() -> str:
+def fetch() -> dict[str, Any]:
     import ssl
 
     # Some Python builds cannot verify moj.minimax.rs against their default
@@ -58,12 +66,40 @@ def fetch() -> str:
             "uv run --with certifi python scripts/refresh_spec.py"
         ) from e
 
+    return document  # type: ignore[no-any-return]
+
+
+def dump(document: Any) -> str:
     return json.dumps(document, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
 
 
-def normalise(path: Path) -> str:
-    doc = json.loads(path.read_text())
-    return json.dumps(doc, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
+def _collapse_whitespace(text: str) -> str:
+    return _BETWEEN_TAGS.sub("><", " ".join(text.split()))
+
+
+def _collapse_prose(node: Any) -> Any:
+    if isinstance(node, dict):
+        return {
+            key: _collapse_whitespace(value)
+            if key in PROSE_FIELDS and isinstance(value, str)
+            else _collapse_prose(value)
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_collapse_prose(item) for item in node]
+    return node
+
+
+def spec_diff(committed: Any, live: Any, *, fromfile: str) -> list[str]:
+    """Unified diff between two Swagger documents, ignoring prose whitespace."""
+    return list(
+        difflib.unified_diff(
+            dump(_collapse_prose(committed)).splitlines(keepends=True),
+            dump(_collapse_prose(live)).splitlines(keepends=True),
+            fromfile=fromfile,
+            tofile="live",
+        )
+    )
 
 
 def main() -> int:
@@ -73,14 +109,7 @@ def main() -> int:
 
     current = newest_spec()
     live = fetch()
-    diff = list(
-        difflib.unified_diff(
-            normalise(current).splitlines(keepends=True),
-            live.splitlines(keepends=True),
-            fromfile=str(current.name),
-            tofile="live",
-        )
-    )
+    diff = spec_diff(json.loads(current.read_text()), live, fromfile=current.name)
 
     if not diff:
         print(f"No change: {current.name} matches the live API surface.")
@@ -94,7 +123,7 @@ def main() -> int:
         return 1
 
     target = SPEC_DIR / f"swagger-{dt.date.today().isoformat()}.json"
-    target.write_text(live)
+    target.write_text(dump(live))
     print(f"\nWrote {target.name}. Next: regenerate and commit that on its own.")
     return 0
 
